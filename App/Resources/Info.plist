@@ -50,6 +50,9 @@
 		<string>audio</string>
 		<string>remote-notification</string>
 		<string>fetch</string>
+		<!-- Hermes Neo: calls from your bots (App/Calls). A PushKit VoIP push wakes the app and is
+		     reported to CallKit at once; iOS requires both for this mode. -->
+		<string>voip</string>
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
