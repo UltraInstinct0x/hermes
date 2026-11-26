@@ -57,15 +57,15 @@ final class WatchLink: NSObject, WCSessionDelegate {
 
     #if DEBUG
     private func fixture(_ request: WatchCompanion.Request) -> WatchCompanion.Response {
-        let id = WatchCompanion.BotID(gateway: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)), profile: "ops")
+        let id = WatchCompanion.BotID(gateway: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)), profile: "default")
         switch request {
         case .roster:
             return .roster([
-                .init(id: id, title: "Ops", gatewayName: "Mock gateway", state: .working),
-                .init(id: .init(gateway: id.gateway, profile: "writer"), title: "Ada", gatewayName: "Mock gateway", state: .offline)
+                .init(id: id, title: "Hermes", gatewayName: "Hermes", state: .working),
+                .init(id: .init(gateway: id.gateway, profile: "writer"), title: "Ada", gatewayName: "Hermes", state: .offline)
             ], hasUnavailableGateway: true)
         case .latestReply(let bot):
-            return bot == id ? .latestReply("The backups finished.") : .unavailable
+            return bot == id ? .latestReply("The **backups** finished.") : .unavailable
         }
     }
     #endif
@@ -86,14 +86,17 @@ private struct WatchBotList: View {
                     } else if bots.isEmpty {
                         Text("Set up Bot Mode in Hermes on your iPhone.").foregroundStyle(.secondary)
                     }
+                    let labels = WatchCompanion.gatewayLabels(for: bots)
                     ForEach(bots) { bot in
                         NavigationLink {
                             WatchBotDetail(bot: bot, phone: phone)
                         } label: {
                             VStack(alignment: .leading) {
-                                Text(bot.title)
-                                Text(bot.gatewayName)
-                                Text(status(bot.state))
+                                Text(bot.title).font(.headline)
+                                if let gateway = labels[bot.id] {
+                                    Text(gateway).font(.footnote).foregroundStyle(.secondary)
+                                }
+                                Text(status(bot.state)).font(.footnote).foregroundStyle(.secondary)
                             }
                             .accessibilityElement(children: .combine)
                         }
@@ -137,7 +140,7 @@ private struct WatchBotDetail: View {
                 switch response {
                 case .latestReply(let reply):
                     if let reply {
-                        Text(verbatim: reply)
+                        Text(WatchCompanion.formattedReply(reply))
                             .accessibilityIdentifier("watchLatestReply")
                     } else {
                         Text("No reply yet.")

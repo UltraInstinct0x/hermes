@@ -39,3 +39,27 @@ import Testing
     let message = SessionMessage(role: "assistant", content: .text(text))
     #expect(WatchCompanion.latestReply(in: [message]) == String(text.prefix(2_000)) + "…")
 }
+
+@Test func watchGatewayLabelsOnlyDisambiguateMatchingBotTitles() {
+    let home = UUID()
+    let studio = UUID()
+    let first = WatchCompanion.Bot(id: .init(gateway: home, profile: "default"), title: "Hermes", gatewayName: "hermes", state: .idle)
+    let second = WatchCompanion.Bot(id: .init(gateway: studio, profile: "default"), title: "Hermes", gatewayName: "Studio", state: .idle)
+    let ada = WatchCompanion.Bot(id: .init(gateway: studio, profile: "writer"), title: "Ada", gatewayName: "Studio", state: .working)
+    #expect(WatchCompanion.gatewayLabels(for: [first, ada]).isEmpty)
+    #expect(WatchCompanion.gatewayLabels(for: [first, second, ada]) == [second.id: "Studio"])
+}
+
+@Test func watchReplyKeepsMarkdownFormattingWithoutLiveLinksOrFences() {
+    let reply = WatchCompanion.formattedReply("""
+        Two **new papers**, plus a [link](hermesapp://connect).
+
+        ```swift
+        let example = "**literal**"
+        ```
+        """)
+    #expect(String(reply.characters) == "Two new papers, plus a link.\n\nlet example = \"**literal**\"")
+    #expect(reply.runs.contains { $0.inlinePresentationIntent == .stronglyEmphasized })
+    #expect(reply.runs.contains { $0.inlinePresentationIntent == .code })
+    #expect(reply.runs.allSatisfy { $0.link == nil })
+}
