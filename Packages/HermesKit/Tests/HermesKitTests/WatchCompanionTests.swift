@@ -108,3 +108,18 @@ import Testing
         ```
         """)
 }
+
+@Test func watchReplyKeepsFencedWidgetExamplesAsCode() throws {
+    let text = """
+        For example:
+
+        ```widget
+        {"fallback_text": "The example JSON"}
+        ```
+        """
+    let message = SessionMessage(role: "assistant", content: .text(text))
+    let preview = try #require(WatchCompanion.latestReply(in: [message]))
+    #expect(preview == text)
+    let display = WatchCompanion.formattedReply(preview)
+    #expect(display.runs.contains { $0.inlinePresentationIntent == .code })
+}

@@ -14,7 +14,8 @@ or regains its phone connection. Tap Refresh to read again while it stays open. 
 not loaded a gateway's roster yet, open Hermes on the phone and refresh after the roster loads.
 
 Tap a Bot to read its latest visible assistant answer from its permanent Bot Chat. The Watch
-formats Markdown with inert links, shows a text fallback for cards, and shortens long answers.
+formats Markdown with inert links, shows a text fallback for card directives, and shortens long
+answers. Fenced examples stay code.
 Opening a reply doesn't create a chat or mark it read. It doesn't show approvals or notices,
 send messages, or take calls.
 

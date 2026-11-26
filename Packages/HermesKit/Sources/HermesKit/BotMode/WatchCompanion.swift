@@ -64,13 +64,11 @@ public enum WatchCompanion {
 
     private static func watchReplyText(_ answer: String) -> String {
         let fallback = String(localized: "View this card in Hermes on your iPhone.")
-        return ReplySplitter.split(answer, inlineWidgets: true).map { segment in
+        return ReplySplitter.split(answer).map { segment in
             switch segment {
             case .markdown(let markdown): markdown
             case .widget(let directive): directive.alt ?? fallback
-            case .inline(let json): json["fallback_text"]?.stringValue ?? fallback
-            case .typed(let json): ReplySplitter.typedWords(json) ?? fallback
-            case .unreadable: fallback
+            case .inline, .typed, .unreadable: fallback
             }
         }.joined(separator: "\n\n")
     }
