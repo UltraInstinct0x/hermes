@@ -296,7 +296,7 @@ final class NeedsYouFeed {
     }
 
     private func updateMoreHistory(_ workspaces: [BotWorkspace]) {
-        let choices: [HistoryRoute] = workspaces.flatMap { workspace in
+        let choices = workspaces.flatMap { workspace -> [HistoryRoute] in
             if boxWorkspaces.contains(workspace.id) {
                 return boxLiveSources[workspace.id]?.isEmpty == false ? [.box(workspace.id)] : []
             }
