@@ -237,6 +237,11 @@ Where `can_apply` (a git checkout), Update Hermes… updates it from the app, af
 `HermesUpdateStart`, `HermesUpdateStatus.outcome(actionID:)` and `HermesUpdateRun` (HermesKit)
 hold these rules; `SetupCenter.updateHermes()` runs it.
 
+**Needs You** checks each source separately. A source with a working ledger is Ready; an older
+source is Partly set up and falls back to open chat requests without history. Not authorized means
+signing in with access to that profile; an offline or failed source is Can't check. Check Again
+refreshes these states without answering or opening any request.
+
 ### 4.2a Long jobs: their lines as they run
 
 On Telegram, `/update` streams: `_handle_update_command` (`gateway/slash_commands.py`) starts

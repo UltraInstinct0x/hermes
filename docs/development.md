@@ -515,6 +515,13 @@ the chats kept current without waiting for iOS ([notifications.md](notifications
 simulator turns `simctl push` into a plain background fetch that never reaches
 `didReceiveRemoteNotification`, so the push handler itself only runs on a device.
 
+For the request ledger, send `approve` in two different Bot chats to open two independent
+requests. The backend serves the profile-scoped `request.list` and `request.history` socket
+methods and the authenticated `/bff/ledger` and `/bff/ledger/history` reads. Use
+`POST /api/mock/ledger-source {profile_id, state}` to set a source to `live`, `unsupported`,
+`not_authorized`, `offline` or `error`, or send `{federation: false}` to simulate an older box.
+`POST /api/mock/answer-elsewhere` can take a `ledger_id` to settle one specific request.
+
 Measuring how chats open (iOS Debug, built with `SWIFT_OPTIMIZATION_LEVEL=-O` so the numbers mean
 something): `-HERMES_FRAME_LOG YES` logs every frame that kept the main thread busy, with its CPU
 time, `-HERMES_LOAD_LOG YES` times each step of loading a chat, and `-HERMES_OPEN_CYCLE
@@ -1235,4 +1242,3 @@ running), Obsidian Memory (off), Langfuse (two keys missing), agent-ledger (pull
 homeassistant update that asks for more access in Hermes's words. `--plugin-catalog none` answers
 404 for the feed; `POST /api/mock/plugin-hub {failing, feed}` makes installs fail or the feed vanish
 while it runs. `-HERMES_APPS_TOOLS plugins` opens the hub, `plugins:suggested` the Mac's pane.
-

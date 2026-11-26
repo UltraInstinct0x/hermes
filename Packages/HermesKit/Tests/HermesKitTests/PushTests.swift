@@ -106,6 +106,21 @@ import Testing
         #expect(NotificationCatalog.actions(for: .board).map(\.identifier) == [NotificationCatalog.Action.open])
     }
 
+    @Test func ledgerNoticeMetadataSurvivesDecodingAndEncoding() throws {
+        let data = Data("""
+            {"kind":"question","ledger_id":"opaque","gateway_id":"home","profile_id":"research",
+             "request_id":"legacy","deadline":120,"expires_at":200}
+            """.utf8)
+        let notice = try JSONDecoder().decode(PushNotice.self, from: data)
+        #expect(notice.ledgerID == "opaque")
+        #expect(notice.gatewayID == "home")
+        #expect(notice.profileID == "research")
+        #expect(notice.requestID == "legacy")
+        #expect(notice.deadline == Date(timeIntervalSince1970: 120))
+        #expect(notice.isExpired(now: Date(timeIntervalSince1970: 121)))
+        #expect(try JSONDecoder().decode(PushNotice.self, from: JSONEncoder().encode(notice)) == notice)
+    }
+
     @Test func questionChoicesBecomeActionsOnlyWhenSimple() {
         var notice = PushNotice(kind: .question, id: "q", questions: [.init(question: "Which?", choices: ["A", "B", "C", "D"])])
         #expect(notice.actionChoices == ["A", "B", "C"])

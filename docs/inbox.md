@@ -384,6 +384,13 @@ The design also gives ⌥⌘↓ to "next mention"; in group chats the mention pi
   leads the root's bottom toolbar, on iPad it sits in the sidebar's toolbar, on the Mac in the
   source list's titlebar and as View ▸ Filter. For anything but This App with no Only the button
   fills, and VoiceOver reads both choices ("This App", "Other Platforms, Unread").
+- **Needs You** shows open requests across connected profiles and gateways, including chats not
+  open on this device. It refreshes on connect, when the app returns or the network comes back,
+  on request frames and every 30 seconds while visible. An approval in the list can be denied
+  by its exact ID; to allow or enter a value, use the original request card. **Earlier** shows
+  recent outcomes, who answered when known, and pages older results. A source that can't be
+  checked is shown separately rather than counted as empty. Older gateways still show open
+  requests from their chat snapshots, without history.
 - **Show** picks which chats the list holds, by the session's `source`
   ([sessions-and-models.md](sessions-and-models.md) §1; `SessionOrigin`, `InboxShow`):
   - **This App**, the default: chats started here, in Hermes Desktop or another API client (no
