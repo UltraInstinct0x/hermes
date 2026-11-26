@@ -344,7 +344,7 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var sessionSections: some View {
-        let shown = workspace.inboxSessions
+        let shown = workspace.inboxSessions.filter { !showsNeedsYou || !app.needsYou.represents($0, in: workspace, app: app) }
         let listed = ChatListSnapshot.listed(shown, firstFrame: isFirstFrame)
         ForEach(listed, id: \.stableID) { session in
             sessionRow(session)

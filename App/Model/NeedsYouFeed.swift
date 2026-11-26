@@ -35,6 +35,12 @@ final class NeedsYouFeed {
     private(set) var loadingHistory = false
     private(set) var answering: Set<LedgerRow.ID> = []
     private(set) var receipts: [LedgerRow.ID: String] = [:]
+    private(set) var requestNames: [LedgerRow.ID: RequestNames] = [:]
+
+    struct RequestNames: Sendable {
+        let bot: String?
+        let chat: String?
+    }
 
     private enum Route: Sendable {
         case direct(BotRoster)
@@ -226,6 +232,31 @@ final class NeedsYouFeed {
         case nil:
             return nil
         }
+    }
+
+    func loadRequestNames(_ row: LedgerRow) async {
+        guard requestNames[row.id] == nil, let route = routes[row.id] else { return }
+        let profile = row.profileID ?? row.profile
+        let names = try? await Self.withRoute(route, readOnly: true) { request in
+            let profiles = try? await request("profiles.list", ["include_sessions": .bool(false)])
+            let bot = profiles?["profiles"]?.arrayValue?.first { $0["name"]?.stringValue == profile }.map(BotProfile.init(json:))
+            guard let id = row.sessionID else { return RequestNames(bot: bot?.title, chat: nil) }
+            let list = try? await request("session.list", [
+                "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
+            ])
+            let chat = list?["sessions"]?.arrayValue?.first {
+                $0["id"]?.stringValue == id || $0["resolved_id"]?.stringValue == id
+            }
+            return RequestNames(bot: bot?.title, chat: chat?["title"]?.stringValue)
+        }
+        if let names { requestNames[row.id] = names }
+    }
+
+    func represents(_ session: HermesSession, in workspace: BotWorkspace, app: AppModel) -> Bool {
+        snapshot?.open.contains { row in
+            (row.sessionID == session.id || row.sessionID == session.stableID)
+                && localWorkspace(for: row, in: app) === workspace
+        } == true
     }
 
     func loadEarlier(_ workspaces: [BotWorkspace]) async {

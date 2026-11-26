@@ -24,6 +24,7 @@ struct NeedsYouRows: View {
                             .accessibilityIdentifier("needsYou.deny")
                         }
                     }
+                    .task(id: row.id) { await feed.loadRequestNames(row) }
                 }
             }
             let rows = snapshot.recent + feed.earlier.filter { row in !snapshot.recent.contains { $0.id == row.id } }
@@ -52,7 +53,29 @@ struct NeedsYouRows: View {
     }
 
     private func entry<Actions: View>(_ row: LedgerRow, detail: String?, @ViewBuilder actions: () -> Actions) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        let workspace = app.needsYou.localWorkspace(for: row, in: app)
+        let bot = workspace?.roster?.bot(named: row.profileID ?? row.profile)
+        let names = app.needsYou.requestNames[row.id]
+        let asker = bot?.title ?? names?.bot ?? (row.profileID ?? row.profile)
+        let chat = names?.chat ?? row.sessionID.flatMap { id in
+            workspace?.session(forKey: workspace?.unreadKey(forStoredSession: id) ?? id)?.displayTitle
+        }
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                if let bot, let roster = workspace?.roster {
+                    BotFace(appearance: roster.appearance(for: bot), size: 22)
+                        .accessibilityHidden(true)
+                }
+                Text(VisibleText.of(asker))
+                    .font(.subheadline.weight(.semibold))
+                if let label = chat ?? row.sessionID.map({ String(localized: "Chat \($0.suffix(6))") }), label != asker {
+                    Text("·")
+                        .accessibilityHidden(true)
+                    Text(VisibleText.of(label))
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
             Text(title(row))
                 .font(.subheadline.weight(.semibold))
                 .accessibilityIdentifier("needsYou.request")
@@ -61,9 +84,11 @@ struct NeedsYouRows: View {
                     .font(.footnote)
                     .lineLimit(3)
             }
-            Text(detail ?? row.profile)
-                .font(.footnote)
-                .foregroundStyle(Theme.secondaryText)
+            if let detail {
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+            }
             HStack { actions() }
                 .buttonStyle(.borderless)
         }
