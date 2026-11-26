@@ -74,20 +74,24 @@ struct NeoCallView: View {
 }
 
 extension View {
-    /// Shows a call from a Bot over the app while it runs (Hermes Neo, `App/Calls`).
-    func neoCallCover() -> some View {
-        modifier(NeoCallCover())
+    /// Shows a call from a Bot over the app while it runs, and hands `NeoBox` the app's gateways,
+    /// whose login pairs this phone with the box (Hermes Neo, `App/Calls`).
+    func neoCallCover(model: AppModel) -> some View {
+        modifier(NeoCallCover(model: model))
     }
 }
 
 private struct NeoCallCover: ViewModifier {
+    let model: AppModel
     @State private var box = NeoBox.shared
 
     func body(content: Content) -> some View {
         let calls = box.calls
-        content.fullScreenCover(isPresented: Binding(get: { calls.isScreenShown }, set: { shown in if !shown { calls.closeScreen() } })) {
-            NeoCallView(calls: calls)
-        }
+        content
+            .fullScreenCover(isPresented: Binding(get: { calls.isScreenShown }, set: { shown in if !shown { calls.closeScreen() } })) {
+                NeoCallView(calls: calls)
+            }
+            .task { box.attach(model) }
     }
 }
 #endif

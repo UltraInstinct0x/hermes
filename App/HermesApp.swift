@@ -104,7 +104,7 @@ struct HermesApp: App {
                 .frame(minWidth: 480, minHeight: 520)
                 #endif
                 #if os(iOS)
-                .neoCallCover()
+                .neoCallCover(model: model)
                 #endif
         }
         #if os(iOS)

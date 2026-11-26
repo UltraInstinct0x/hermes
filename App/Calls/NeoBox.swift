@@ -1,4 +1,5 @@
 #if os(iOS)
+import CryptoKit
 import Foundation
 import HermesBox
 import HermesKit
@@ -6,8 +7,10 @@ import Observation
 
 /// Hermes Neo: the owner's box (its BFF, `box/bff`) and the calls its Bots make to this phone.
 ///
-/// - Pairing: the box's pairing link or QR code (`/bff/pair/redeem`, `client: "ios"`); the device
-///   token goes to the Keychain and every request carries it as a Bearer (`DeviceBearer`).
+/// - No pairing step of its own: the box pairs this phone on the owner's gateway login
+///   (`POST /bff/pair/gateway` on `https://<gateway host>:<boxPort>`, with the credential exactly as
+///   `BackendClient` sends it to that gateway). The device token it returns goes to the Keychain and
+///   every later request carries it as a Bearer (`DeviceBearer`).
 /// - "Calls from your bots" (off by default): the PushKit VoIP token on the box
 ///   (`POST /bff/push/voip/register {token, environment, topic}`), Test ring.
 /// - A ring: PushKit hands the push to `RingCoordinator`, which reports it to CallKit at once; an
@@ -21,16 +24,24 @@ import Observation
 final class NeoBox {
     static let shared = NeoBox()
 
+    /// The box BFF's port on the gateway's host (`tailscale serve`): the gateway is on its own port,
+    /// the BFF on this one. `defaults write dev.supersaiyan.hermesneo neo.boxPort -int <port>` overrides it.
+    static var boxPort: Int {
+        (UserDefaults.standard.object(forKey: "neo.boxPort") as? Int) ?? defaultBoxPort
+    }
+    static let defaultBoxPort = 9443
+    static let deviceLabel = "HermesNeo"
+
     /// The paired box, or nil.
     private(set) var box: PairedBox?
-    var linkText = ""
-    var boxAddress = ""
     private(set) var isPairing = false
     private(set) var pairingFailure: CalmFailure?
 
     let voip: VoIPRegistrar
     let calls: CallController
 
+    /// The app's gateways, whose login pairs this phone with the box. Set once the first window is up.
+    @ObservationIgnored private weak var app: AppModel?
     @ObservationIgnored private let pairing: PairingService
     @ObservationIgnored private let links: NeoCallLinks
     @ObservationIgnored private let microphone = AppleCallMicrophone()
@@ -41,7 +52,7 @@ final class NeoBox {
     private init() {
         let http = URLSessionHTTPTransport()
         let service = (Bundle.main.bundleIdentifier ?? "hermes-neo") + ".box"
-        pairing = PairingService(transport: http, secrets: KeychainSecretStore(service: service), deviceLabel: "iPhone (Hermes Neo)")
+        pairing = PairingService(transport: http, secrets: KeychainSecretStore(service: service), deviceLabel: Self.deviceLabel)
         let links = NeoCallLinks(http: http, authorizer: pairing.authorizer())
         self.links = links
         #if DEBUG
@@ -70,11 +81,27 @@ final class NeoBox {
         callKit.coordinator = rings
         restoreIfNeeded()
         pushKit = NeoPushKitHost(coordinator: rings, voip: voip)
+        // The box refused the device token: drop it, so the next attempt pairs again on the gateway login.
+        voip.onUnauthorized = { [weak self] in self?.forgetPairing() }
     }
 
     var isPaired: Bool { box != nil }
 
-    // MARK: pairing
+    /// The line under the switch.
+    var statusLine: String {
+        guard voip.isEnabled, box == nil else { return voip.statusLine }
+        return isPairing ? "On. Connecting to your box through your gateway." : "On, once this phone can reach your box."
+    }
+
+    // MARK: pairing on the gateway login
+
+    /// The app's gateways, once the first window is up. With the switch on, the box pairing is
+    /// checked now (no pairing yet, or a different login).
+    func attach(_ app: AppModel) {
+        self.app = app
+        guard voip.isEnabled else { return }
+        Task { await ensurePaired(quietly: true) }
+    }
 
     /// The pairing this phone saved, read again (at launch, or a ring that woke the app before the
     /// Keychain could be read).
@@ -84,28 +111,84 @@ final class NeoBox {
         adopt(stored)
     }
 
-    /// Redeem the pasted or scanned link. The link is a one-time credential: it is cleared after.
-    func pair() async {
+    /// Paired with the box on the current gateway login: kept when it was made with this login and
+    /// this box, made again otherwise. `quietly`: at launch, a gateway that isn't loaded yet isn't a failure.
+    @discardableResult
+    func ensurePaired(quietly: Bool = false) async -> Bool {
+        guard !isPairing else { return false }
+        guard let login = await gatewayLogin() else {
+            if box != nil { return true }
+            if !quietly {
+                pairingFailure = CalmFailure(
+                    sentence: "Add your gateway and sign in to it, then try again.", details: "no gateway with a login", retry: .pair)
+            }
+            return false
+        }
+        if let box, box.baseURL == login.bff, pairing.gatewayFingerprint() == login.fingerprint { return true }
+        if box != nil { forgetPairing() }
         isPairing = true
-        pairingFailure = nil
         defer { isPairing = false }
         do {
-            let link = try BoxPairingLink.parse(linkText).get()
-            let address = boxAddress.isEmpty ? nil : BoxPairingLink.baseURL(fromAddress: boxAddress)
-            let paired = try await pairing.pair(link, baseURL: address)
-            linkText = ""
+            let paired = try await pairing.pairWithGateway(baseURL: login.bff, credentialHeaders: login.headers)
+            pairing.rememberGatewayFingerprint(login.fingerprint)
+            pairingFailure = nil
             adopt(paired)
+            return true
         } catch {
-            pairingFailure = CalmFailure.from(error, retry: .pair)
+            pairingFailure = Self.pairingFailure(error)
+            return false
         }
     }
 
-    /// The box forgets this phone's call token, then the pairing goes.
-    func unpair() async {
-        await voip.forget()
+    /// The gateway whose login pairs this phone: the one in use, else the first with Bot Mode and a
+    /// login. The box is on the same host, on `boxPort`.
+    private func gatewayLogin() async -> (bff: URL, headers: [String: String], fingerprint: String)? {
+        guard let app else { return nil }
+        let workspaces = [app.currentWorkspace].compactMap { $0 } + app.bots.compactMap { app.workspaces[$0.id] }
+        for workspace in workspaces {
+            guard let client = workspace.roster?.backendClient, let host = client.baseURL.host() else { continue }
+            let headers = await client.authorizationHeaders()
+            guard !headers.isEmpty else { continue }
+            var components = URLComponents()
+            components.scheme = "https"
+            components.host = host
+            components.port = Self.boxPort
+            guard let bff = components.url else { continue }
+            return (bff, headers, Self.fingerprint(host: host, headers: headers))
+        }
+        return nil
+    }
+
+    /// Which login the pairing was made with, one way: the session token itself, or only that it was
+    /// a cookie sign-in (the gate refreshes cookies on use, so their values change without a new login;
+    /// a refused device token re-pairs those).
+    private static func fingerprint(host: String, headers: [String: String]) -> String {
+        let login = headers["X-Hermes-Session-Token"].map { "token:\($0)" } ?? "cookies"
+        let digest = SHA256.hash(data: Data("\(host)|\(login)".utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func pairingFailure(_ error: any Error) -> CalmFailure {
+        let details = "pair on gateway login: \((error as? BFFError)?.detail ?? String(describing: error))"
+        let sentence = switch error {
+        case BFFError.envelope(_, _, 401), BFFError.envelope(_, _, 403), BFFError.unexpectedStatus(401), BFFError.unexpectedStatus(403):
+            "Sign in to your gateway again, then try again."
+        case BFFError.envelope(_, _, 429), BFFError.unexpectedStatus(429):
+            "Too many tries. Wait a few minutes, then try again."
+        case BFFError.envelope(_, _, 502), BFFError.unexpectedStatus(502), BFFError.unreachable:
+            "Could not reach your box through your gateway. Check that Tailscale is on, then try again."
+        default:
+            "Could not connect this phone to your box. Try again."
+        }
+        return CalmFailure(sentence: sentence, details: details, retry: .pair)
+    }
+
+    /// The box's device token is no good (or the login changed): forget it; the next attempt pairs again.
+    private func forgetPairing() {
         try? pairing.forget()
         links.bff = nil
         box = nil
+        voip.attach(nil)
     }
 
     private func adopt(_ paired: PairedBox) {
@@ -117,10 +200,28 @@ final class NeoBox {
 
     // MARK: calls from your bots
 
-    /// The switch. Turning it on asks for the microphone now: a ring can't ask from a locked phone.
+    /// The switch. Turning it on asks for the microphone now (a ring can't ask from a locked phone),
+    /// then pairs with the box on the gateway login if needed, then registers the call token.
     func setCallsEnabled(_ on: Bool) async {
-        if on, microphone.access() == .undetermined { _ = await microphone.request() }
+        if on {
+            if microphone.access() == .undetermined { _ = await microphone.request() }
+            await ensurePaired()
+        } else {
+            pairingFailure = nil
+        }
         await voip.setEnabled(on)
+    }
+
+    /// Retry: pair again if needed, then register the call token again.
+    func retry() async {
+        guard await ensurePaired() else { return }
+        await voip.retry()
+    }
+
+    /// Settings opened: with the switch on, check the pairing and read the box's status.
+    func refresh() async {
+        if voip.isEnabled { await ensurePaired(quietly: true) }
+        await voip.refreshStatus()
     }
 
     var microphoneDenied: Bool { microphone.access() == .denied }

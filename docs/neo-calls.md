@@ -35,25 +35,39 @@ an app that leaves a VoIP push unreported and stops sending it VoIP pushes after
 
 | Piece | Where |
 |---|---|
-| Pairing, BFF client, device Bearer | `Packages/HermesBox/Sources/HermesBox/{BFF,Pairing}` (`BoxPairingLink`, `PairingService`) |
+| Pairing, BFF client, device Bearer | `Packages/HermesBox/Sources/HermesBox/{BFF,Pairing}` (`PairingService.pairWithGateway`) |
 | VoIP token, switch, Test ring | `CallOwner/VoIPRegistrar.swift`, `CallOwnerAPI.swift` |
 | Ring rules, CallKit coordination | `CallOwner/RingDecision.swift`, `RingCoordinator.swift`, `RingWatch.swift` |
 | The call hub client and the call | `Call/CallClient.swift`, `CallWire.swift`, `CallSession.swift`, `CallController.swift` |
 | App glue | `App/Calls`: `NeoBox` (made at launch), `NeoPushKitHost`, `NeoCallKitHost`, `NeoCallAudio`, settings, call screen |
 
-The box contract is frozen (`box/bff`): `POST /bff/pair/redeem`; `POST /bff/push/voip/register {token, environment,
+The box contract (`box/bff`): `POST /bff/pair/gateway`; `POST /bff/push/voip/register {token, environment,
 topic}` where `topic` is the app's bundle id and `environment` is `sandbox` for a build with a development profile,
 `production` otherwise; `DELETE /bff/push/voip/register`; `GET /bff/push/apns/status` (`voip`);
 `POST /bff/call-owner/test-ring`; the call socket `/gw/<id>/api/call/ws` (`box/call-hub/protocol.mjs`).
 
-## 4. Settings
+## 4. Pairing on the gateway login
 
-Settings → Calls: pair with the box (scan its QR code or paste its link), **Calls from your bots** (off by default;
-turning it on asks for the microphone, which a ring can't ask for on a locked phone), its status line, **Test ring**,
-Unpair.
+There's no pairing step. When **Calls from your bots** is switched on (and at launch, and when Settings opens, while it
+is on) and the phone has no box device token, `NeoBox` takes the gateway in use (else the first with Bot Mode and a
+login), and posts `{"deviceLabel":"HermesNeo","client":"ios"}` to `https://<that gateway's host>:9443/bff/pair/gateway`
+with the gateway credential exactly as `BackendClient` sends it (`X-Hermes-Session-Token`, or its `Cookie`;
+`BackendClient.authorizationHeaders()`). The port is `NeoBox.boxPort` (`neo.boxPort` in user defaults overrides it).
 
-## 5. What to check (on the iPhone)
+- 200: `{ok, device, deviceToken}`; the token goes to the Keychain and is the Bearer of every later box request.
+- 403: "Sign in to your gateway again, then try again." with Retry (429 after repeated refusals: wait).
+- 502 or no network: "Could not reach your box through your gateway…" with Retry.
+- A different session token than the one the pairing was made with (a SHA-256 of it is kept in the Keychain), or a
+  401/403 from the box to the device token later, drops the stored token, so the next attempt pairs again.
 
-1. Pair with the box's QR code. 2. Turn on Calls from your bots: "On. Your bots can ring this phone." 3. Test ring, lock
-the phone: a full-screen call with the Hermes ringtone. 4. Answer: the Bot's opener within a few seconds; Mute and End
-from CallKit work. 5. Decline: the box logs `declined`. 6. Let one ring out: a missed call in Recents.
+## 5. Settings
+
+Settings → Calls: **Calls from your bots** (off by default; turning it on asks for the microphone, which a ring can't ask
+for on a locked phone, then pairs and registers), its status line, the microphone warning, a failure with Retry, and
+**Test ring**.
+
+## 6. What to check (on the iPhone)
+
+1. Settings → Calls → turn on Calls from your bots: "On. Your bots can ring this phone." 2. Test ring, lock the phone: a
+full-screen call with the Hermes ringtone. 3. Answer: the Bot's opener within a few seconds; Mute and End from CallKit
+work. 4. Decline: the box logs `declined`. 5. Let one ring out: a missed call in Recents.
