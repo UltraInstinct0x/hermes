@@ -116,12 +116,12 @@ struct BasePresentationTests {
     }
 
     @Test func theBubbleIsNamedAfterTheAppAndACallAfterItsBot() {
-        // Owner 2026-10-12: the app's name reads "Hermes Bot", the app display name; a bot's own name is never replaced.
-        #expect(ActivityBrand.name == "Hermes Bot" && ActivityBrand.markImageName == "HermesMark")
+        // Owner 2026-10-12: the app's name reads the app display name (Hermes Neo here); a bot's own name is never replaced.
+        #expect(ActivityBrand.name == "Hermes Neo" && ActivityBrand.markImageName == "HermesMark")
         let idle = BaseActivityPresentation(state(online: 1, total: 1, waiting: 0))
-        #expect(idle.title == "Hermes Bot")
-        #expect(idle.accessibilityLabel(now: date(1_000)).hasPrefix("Hermes Bot. "))
-        #expect(BaseActivityAttributes().title == "Hermes Bot")
+        #expect(idle.title == "Hermes Neo")
+        #expect(idle.accessibilityLabel(now: date(1_000)).hasPrefix("Hermes Neo. "))
+        #expect(BaseActivityAttributes().title == "Hermes Neo")
         var s = state()
         s.mode = .call
         s.call = .init(botKey: "g::p", botName: "alan", stateLine: "Listening", startedAt: 1, ownerHere: true)

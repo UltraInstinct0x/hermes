@@ -9,6 +9,9 @@ struct HermesWidgets: WidgetBundle {
         TurnActivityWidget()
         TalkActivityWidget()
         TalkControl()
+        // Hermes Neo: the box's Live Activities (Neo/Activities).
+        NeoRequestLiveActivity()
+        NeoBaseLiveActivity()
     }
 }
 

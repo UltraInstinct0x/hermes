@@ -1,6 +1,7 @@
 #if os(iOS)
 import CryptoKit
 import Foundation
+import HermesActivityKit
 import HermesBox
 import HermesKit
 import Observation
@@ -39,6 +40,10 @@ final class NeoBox {
 
     let voip: VoIPRegistrar
     let calls: CallController
+    /// Requests and Live Activities: this phone's push tokens on the box (`NeoRequests.swift`).
+    let push: PushRegistrar
+    /// What the owner chose for the Lock Screen. Neo never asks the box for chat notifications.
+    private(set) var lockScreen: LockScreenPreferences
 
     /// The app's gateways, whose login pairs this phone with the box. Set once the first window is up.
     @ObservationIgnored private weak var app: AppModel?
@@ -48,6 +53,8 @@ final class NeoBox {
     @ObservationIgnored private let callKit: NeoCallKitHost
     @ObservationIgnored private let rings: RingCoordinator
     @ObservationIgnored private var pushKit: NeoPushKitHost?
+    @ObservationIgnored private let lockScreenStore = UserDefaultsLockScreenPreferences(key: "neo.lockScreenPreferences.v1")
+    @ObservationIgnored private var activities: NeoActivityHost?
 
     private init() {
         let http = URLSessionHTTPTransport()
@@ -63,6 +70,11 @@ final class NeoBox {
         let environment = ApsEnvironment.current(
             profileURL: Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"), isSimulatorOrDebugFallback: debugFallback)
         voip = VoIPRegistrar(environment: environment, topic: Bundle.main.bundleIdentifier, store: UserDefaultsCallsFromBots())
+        push = PushRegistrar(platform: NeoRemotePlatform(environment: environment), topic: Bundle.main.bundleIdentifier, state: UserDefaultsPushState())
+        var chosen = UserDefaultsLockScreenPreferences(key: "neo.lockScreenPreferences.v1").load() ?? .allOff
+        chosen.notifications = false
+        lockScreen = chosen
+        push.configure(preferences: chosen)
         let audio = NeoCallAudio()
         let calls = CallController(
             makeLink: { links.makeCallLink(gatewayId: $0) }, audio: audio, audioSession: VoiceAudioSession(driver: audio),
@@ -83,6 +95,12 @@ final class NeoBox {
         pushKit = NeoPushKitHost(coordinator: rings, voip: voip)
         // The box refused the device token: drop it, so the next attempt pairs again on the gateway login.
         voip.onUnauthorized = { [weak self] in self?.forgetPairing() }
+        // The Lock Screen buttons (App Intents run in this process) answer through this box.
+        NeoActivityButtonRouter.handler = self
+        let push = self.push
+        let activities = NeoActivityHost { event in await push.handle(event) }
+        activities.start()
+        self.activities = activities
     }
 
     var isPaired: Bool { box != nil }
@@ -189,13 +207,68 @@ final class NeoBox {
         links.bff = nil
         box = nil
         voip.attach(nil)
+        push.attach(nil)
     }
 
     private func adopt(_ paired: PairedBox) {
         let client = links.adopt(paired)
         box = paired
         voip.attach(client)
-        Task { [voip] in await voip.start() }
+        push.attach(client)
+        let lockScreen = lockScreen
+        Task { [voip, push] in
+            await voip.start()
+            if lockScreen.wantsPush { await push.start(preferences: lockScreen) }
+        }
+    }
+
+    /// The box's answers to a waiting request, on the paired box's gateway socket with the device Bearer.
+    func requestAnswers() -> BoxRequestAnswers? {
+        guard let bff = links.bff else { return nil }
+        let authorizer = pairing.authorizer()
+        return BoxRequestAnswers(
+            url: { bff.gatewayWebSocketURL(gatewayId: $0) },
+            headers: { await authorizer.authorize(URLRequest(url: bff.baseURL)).allHTTPHeaderFields ?? [:] })
+    }
+
+    // MARK: requests and Live Activities
+
+    /// The APNs token, from `PushAppDelegate` (upstream's delegate hands it to its relay layer too).
+    func deviceTokenReceived(_ token: Data) {
+        let hex = ActivityPushTokens.hex(token)
+        Task { [push] in await push.deviceTokenReceived(hex) }
+    }
+
+    /// "Requests on this phone": approvals and questions as a Lock Screen bubble with their answers.
+    func setRequestsEnabled(_ on: Bool) async {
+        var new = lockScreen
+        new.approvals = on
+        await apply(new)
+    }
+
+    /// "Your bots on the Lock Screen": the always-on bubble.
+    func setBotsBubbleEnabled(_ on: Bool) async {
+        var new = lockScreen
+        new.alwaysOn = on
+        await apply(new)
+    }
+
+    private func apply(_ new: LockScreenPreferences) async {
+        var new = new
+        new.notifications = false
+        // Neo draws no separate call bubble (CallKit shows the call), so it never asks for one.
+        new.call = false
+        lockScreen = new
+        lockScreenStore.save(new)
+        if new.wantsPush { await ensurePaired() }
+        guard isPaired else { return }
+        await push.preferencesChanged(new)
+    }
+
+    /// Settings opened: read the box's push status.
+    func refreshPush() async {
+        if lockScreen.wantsPush { await ensurePaired(quietly: true) }
+        await push.refreshStatus()
     }
 
     // MARK: calls from your bots

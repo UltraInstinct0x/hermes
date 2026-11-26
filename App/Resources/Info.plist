@@ -64,6 +64,9 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<!-- Hermes Neo: the box updates its requests and always-on bubbles often (Neo/Activities). -->
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
 	<!-- Whether this build carries the iCloud key-value entitlement, so hidden plugins sync
 	     (docs/plugins.md §9.3). YES or NO, from a build setting in project.yml. -->
 	<key>HermesICloudKeyValueSync</key>

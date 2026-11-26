@@ -54,6 +54,58 @@ struct NeoCallsSettingsSection: View {
         } footer: {
             Text(CallOwnerCopy.footnote)
         }
+        NeoRequestsSettingsSection(box: box)
+    }
+}
+
+/// Settings → Requests: what the box may put on this phone's Lock Screen (Hermes Bot's S22 choices, minimal): the
+/// requests bubble with Approve, Deny and a question's answers, and the always-on bubble of your bots. No chat
+/// notifications. Test notification asks the box for one alert and one bubble update.
+struct NeoRequestsSettingsSection: View {
+    let box: NeoBox
+
+    var body: some View {
+        let push = box.push
+        Section {
+            Toggle(isOn: Binding(get: { box.lockScreen.approvals }, set: { on in Task { await box.setRequestsEnabled(on) } })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Requests on this phone")
+                    Text("Approvals and questions on the Lock Screen, answered there.").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .task { await box.refreshPush() }
+            Toggle(isOn: Binding(get: { box.lockScreen.alwaysOn }, set: { on in Task { await box.setBotsBubbleEnabled(on) } })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Your bots on the Lock Screen")
+                    Text("A Live Activity with what your bots are doing.").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            if box.lockScreen.wantsPush {
+                if push.serverEnabled == false {
+                    Text("Your box has push turned off.").font(.footnote).foregroundStyle(.orange)
+                } else if let error = push.diagnostics.lastError {
+                    Text(error).font(.footnote).foregroundStyle(.orange)
+                } else if push.diagnostics.notificationsAllowed == false {
+                    Text("Notifications are off for Hermes Neo in Settings, so requests arrive without a sound.")
+                        .font(.footnote).foregroundStyle(.orange)
+                }
+                Button {
+                    Task { await push.sendTest() }
+                } label: {
+                    HStack {
+                        Text("Test notification")
+                        Spacer()
+                        if push.isTesting { ProgressView() }
+                    }
+                }
+                .disabled(push.isTesting || !box.isPaired)
+                if let sentence = push.testSentence {
+                    Text(sentence).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Requests")
+        }
     }
 }
 
