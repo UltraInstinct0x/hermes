@@ -213,15 +213,18 @@ struct NeoCallScreen: View {
             if let notice = state.notice {
                 Text(notice).font(.footnote).foregroundStyle(Theme.secondaryText)
             }
+            // The transcript's own region, below the status line: older lines fade out at its top edge,
+            // inside the region, and nothing is drawn outside it.
             NeoCallTranscript(lines: state.lines)
                 .frame(maxHeight: .infinity)
-                // Older lines fade out under the indicator instead of being cut.
                 .mask {
                     VStack(spacing: 0) {
                         LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 28)
                         Color.black
                     }
                 }
+                .clipShape(Rectangle())
+                .padding(.top, 8)
             if !state.display.isEmpty {
                 NeoBotPane(items: state.display, onClear: actions.clearDisplay)
                     .containerRelativeFrame(.vertical) { height, _ in height * 0.34 }

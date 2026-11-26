@@ -32,6 +32,9 @@ struct NeoCallTranscript: View {
             }
             .padding(.vertical, 8)
         }
+        // Room under the fade, so the oldest line still in view is readable once scrolled to.
+        .contentMargins(.top, 24, for: .scrollContent)
+        .scrollClipDisabled(false)
         .scrollPosition($position)
         .defaultScrollAnchor(.bottom)
         .scrollIndicators(.hidden)
