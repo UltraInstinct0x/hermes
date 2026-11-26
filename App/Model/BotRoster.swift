@@ -1,5 +1,6 @@
 import Foundation
 import HermesKit
+import HermesPush
 import Network
 import Observation
 #if os(iOS)
@@ -7,6 +8,17 @@ import UIKit
 #else
 import AppKit
 #endif
+
+extension GatewaySocket.ClientIdentity {
+    static var hermesApp: Self {
+        #if os(iOS)
+        let label = UIDevice.current.userInterfaceIdiom == .pad ? "Hermes on iPad" : "Hermes on iPhone"
+        return Self(id: PushShared.current.deviceID, label: label, kind: "ios")
+        #else
+        return Self(id: PushShared.current.deviceID, label: "Hermes on Mac", kind: "macos")
+        #endif
+    }
+}
 
 /// Bot Mode for one gateway: the roster of Bots on its Hermes backend (`hermes serve`),
 /// their Bot Chats, looks and routines — Hermes Desktop's Bots pane, natively.
@@ -686,13 +698,13 @@ final class BotRoster {
     /// token is read again once.
     private func openSocket() async throws -> GatewaySocket {
         do {
-            let socket = GatewaySocket(url: try await client.gatewaySocketURL())
+            let socket = GatewaySocket(url: try await client.gatewaySocketURL(), clientIdentity: .hermesApp)
             try await socket.connect()
             return socket
         } catch {
             guard link.signIn == .automatic, Self.isAuthFailure(error) else { throw error }
             _ = try await client.discoverSessionToken()
-            let socket = GatewaySocket(url: try await client.gatewaySocketURL())
+            let socket = GatewaySocket(url: try await client.gatewaySocketURL(), clientIdentity: .hermesApp)
             try await socket.connect()
             return socket
         }
