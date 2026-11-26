@@ -86,6 +86,13 @@ public struct LedgerSnapshot: Decodable, Sendable, Equatable {
     public let openCount: Int
     public let sources: [LedgerSource]?
 
+    public init(open: [LedgerRow], recent: [LedgerRow], openCount: Int, sources: [LedgerSource]?) {
+        self.open = open
+        self.recent = recent
+        self.openCount = openCount
+        self.sources = sources
+    }
+
     enum CodingKeys: String, CodingKey {
         case open, recent, sources, openCount = "open_count"
     }

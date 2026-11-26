@@ -70,6 +70,7 @@ final class NeedsYouFeed {
             for workspace in workspaces {
                 guard let roster = workspace.roster, !Task.isCancelled else { continue }
                 let backend = roster.backendClient
+                var coverage: [LedgerSource] = []
                 do {
                     if let box = try await backend.federatedLedger() {
                         snapshots.append(box)
@@ -88,15 +89,17 @@ final class NeedsYouFeed {
                         continue
                     }
                 } catch {
-                    workspace.ledgerSources = [LedgerSource(id: .init(gatewayID: workspace.id.uuidString, profileID: nil),
-                                                            state: RequestLedgerClient.state(of: error))]
+                    coverage = [LedgerSource(id: .init(gatewayID: workspace.id.uuidString, profileID: nil),
+                                             state: RequestLedgerClient.state(of: error))]
+                    snapshots.append(LedgerSnapshot(open: [], recent: [], openCount: 0, sources: coverage))
                 }
                 let sources = directSources(workspace, roster: roster)
                 if let local = try? await RequestLedgerClient.snapshot(sources: sources) {
                     snapshots.append(local)
-                    workspace.ledgerSources = local.sources ?? []
+                    coverage += local.sources ?? []
                     for row in local.open where routing[row.id] == nil { routing[row.id] = .direct(roster) }
                 }
+                workspace.ledgerSources = coverage
             }
             guard !Task.isCancelled else { return }
             let merged = LedgerSnapshot.merge(snapshots)
