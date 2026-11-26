@@ -12,16 +12,30 @@ struct NeedsYouRows: View {
             if !snapshot.open.isEmpty {
                 SidebarSectionTitle(title: String(localized: "Needs You"))
                 ForEach(snapshot.open) { row in
-                    entry(row, detail: feed.receipts[row.id]) {
-                        if feed.localWorkspace(for: row, in: app) != nil {
-                            Button("Open Chat") { feed.openLocalChat(row, app: app, window: windowID) }
-                        }
-                        if feed.canDeny(row) {
-                            Button("Deny", role: .destructive) {
-                                Task { await feed.deny(row, workspaces: Array(app.workspaces.values)) }
+                    let choices = feed.inlineChoices(row)
+                    entry(row, detail: feed.receipts[row.id], showWholeCommand: choices.contains(.once)) {
+                        if !choices.isEmpty {
+                            HStack(spacing: 8) {
+                                if choices.contains(.deny) {
+                                    ActionTile(symbol: "xmark", title: String(localized: "Deny"),
+                                               detail: String(localized: "Don't run this command"), style: .danger) {
+                                        answer(row, with: .deny)
+                                    }
+                                    .accessibilityIdentifier("needsYou.deny")
+                                }
+                                if choices.contains(.once) {
+                                    ActionTile(symbol: "checkmark", title: String(localized: "Allow Once"),
+                                               detail: String(localized: "Only this command"), style: .primary) {
+                                        answer(row, with: .once)
+                                    }
+                                    .accessibilityIdentifier("needsYou.allow")
+                                }
                             }
                             .disabled(feed.answering.contains(row.id))
-                            .accessibilityIdentifier("needsYou.deny")
+                        }
+                        if feed.localWorkspace(for: row, in: app) != nil {
+                            Button("Open Chat") { feed.openLocalChat(row, app: app, window: windowID) }
+                                .buttonStyle(.borderless)
                         }
                     }
                     .task(id: row.id) { await feed.loadRequestNames(row) }
@@ -52,7 +66,13 @@ struct NeedsYouRows: View {
         }
     }
 
-    private func entry<Actions: View>(_ row: LedgerRow, detail: String?, @ViewBuilder actions: () -> Actions) -> some View {
+    private func answer(_ row: LedgerRow, with choice: ApprovalChoice) {
+        Task { await app.needsYou.answer(row, choice: choice, workspaces: Array(app.workspaces.values)) }
+    }
+
+    private func entry<Actions: View>(
+        _ row: LedgerRow, detail: String?, showWholeCommand: Bool = false, @ViewBuilder actions: () -> Actions
+    ) -> some View {
         let workspace = app.needsYou.localWorkspace(for: row, in: app)
         let bot = workspace?.roster?.bot(named: row.profileID ?? row.profile)
         let names = app.needsYou.requestNames[row.id]
@@ -79,7 +99,11 @@ struct NeedsYouRows: View {
             Text(title(row))
                 .font(.subheadline.weight(.semibold))
                 .accessibilityIdentifier("needsYou.request")
-            if let prompt = row.prompt, !prompt.isEmpty {
+            if showWholeCommand, let command = names?.approval?.command {
+                Text(command)
+                    .font(.footnote.monospaced())
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let prompt = row.prompt, !prompt.isEmpty {
                 Text(VisibleText.of(prompt))
                     .font(.footnote)
                     .lineLimit(3)
@@ -89,8 +113,7 @@ struct NeedsYouRows: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.secondaryText)
             }
-            HStack { actions() }
-                .buttonStyle(.borderless)
+            actions()
         }
         .padding(.vertical, 8)
         .modifier(SidebarRowInsets())

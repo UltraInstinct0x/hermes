@@ -40,6 +40,7 @@ final class NeedsYouFeed {
     struct RequestNames: Sendable {
         let bot: String?
         let chat: String?
+        let approval: ApprovalRequest?
     }
 
     private enum Route: Sendable {
@@ -172,18 +173,25 @@ final class NeedsYouFeed {
         return try await perform { try await socket.request($0, $1, timeout: .seconds(10)) }
     }
 
-    func canDeny(_ row: LedgerRow) -> Bool {
-        row.ledgerID != nil && routes[row.id] != nil && receipts[row.id] == nil && row.kind == "approval"
-            && (row.expiresAt.map { $0 > Date.now.timeIntervalSince1970 } ?? true)
+    func inlineChoices(_ row: LedgerRow) -> [ApprovalChoice] {
+        guard routes[row.id] != nil, receipts[row.id] == nil,
+              row.expiresAt.map({ $0 > Date.now.timeIntervalSince1970 }) ?? true,
+              let approval = requestNames[row.id]?.approval,
+              !approval.smartDenied, !approval.isMemorySave, !approval.isPaymentFill else { return [] }
+        return approval.choices.filter { choice in
+            guard row.choices?.contains(.string(choice.rawValue)) == true else { return false }
+            return choice == .deny || choice == .once && approval.command.map(ApprovalCard.showsWholeInBatch) == true
+        }
     }
 
-    func deny(_ row: LedgerRow, workspaces: [BotWorkspace]) async {
-        guard canDeny(row), let id = row.ledgerID, let route = routes[row.id], answering.insert(row.id).inserted else { return }
+    func answer(_ row: LedgerRow, choice: ApprovalChoice, workspaces: [BotWorkspace]) async {
+        guard inlineChoices(row).contains(choice), let id = row.ledgerID, let route = routes[row.id],
+              answering.insert(row.id).inserted else { return }
         defer { answering.remove(row.id) }
         do {
             let answer = try await Self.withRoute(route) { transport in
                 try await RequestLedgerClient(transport: transport).answer(ledgerID: id, profile: row.profileID ?? row.profile,
-                                                                            result: ["choice": .string("deny")])
+                                                                            result: ["choice": .string(choice.rawValue)])
             }
             switch answer {
             case .accepted(let winner):
@@ -240,14 +248,23 @@ final class NeedsYouFeed {
         let names = try? await Self.withRoute(route, readOnly: true) { request in
             let profiles = try? await request("profiles.list", ["include_sessions": .bool(false)])
             let bot = profiles?["profiles"]?.arrayValue?.first { $0["name"]?.stringValue == profile }.map(BotProfile.init(json:))
-            guard let id = row.sessionID else { return RequestNames(bot: bot?.title, chat: nil) }
+            guard let id = row.sessionID else { return RequestNames(bot: bot?.title, chat: nil, approval: nil) }
             let list = try? await request("session.list", [
                 "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
             ])
             let chat = list?["sessions"]?.arrayValue?.first {
                 $0["id"]?.stringValue == id || $0["resolved_id"]?.stringValue == id
             }
-            return RequestNames(bot: bot?.title, chat: chat?["title"]?.stringValue)
+            let approval: ApprovalRequest?
+            if row.kind == "approval", row.ledgerID != nil,
+               let snapshot = try? await request("session.resume", [
+                   "session_id": .string(id), "profile": .string(profile), "omit_messages": .bool(true),
+               ]) {
+                approval = row.approval(in: snapshot)
+            } else {
+                approval = nil
+            }
+            return RequestNames(bot: bot?.title, chat: chat?["title"]?.stringValue, approval: approval)
         }
         if let names { requestNames[row.id] = names }
     }

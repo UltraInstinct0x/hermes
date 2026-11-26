@@ -1402,7 +1402,8 @@ def run_turn(sid, text):
             command, description, size = "rm -rf ~/Library/Caches/com.example.build", "Delete the build cache (1.2 GB)", "1.2 GB"
         result = server_request(sid, "approval", {
             "request_id": f"ap_{uuid.uuid4().hex[:6]}", "command": command,
-            "description": description, "choices": ["once", "session", "always", "deny"]})
+            "description": description, "choices": ["once", "session", "always", "deny"],
+            "smart_denied": "approve flagged" in visible.lower()})
         if runtime["interrupt"]:
             # Stop withdrew the card (`session.interrupt`): Hermes's tool fails closed and the agent loop
             # breaks before another model call, so the turn ends interrupted with no reply.

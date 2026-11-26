@@ -40,6 +40,16 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
         return ID(canonical: false, gateway: gatewayID, profile: profile, key: requestID)
     }
 
+    public func approval(in snapshot: JSONValue) -> ApprovalRequest? {
+        guard kind == "approval", let ledgerID else { return nil }
+        for frame in snapshot["open_requests"]?.arrayValue ?? [] {
+            guard frame["method"]?.stringValue == "approval", let id = frame["id"]?.stringValue,
+                  let params = frame["params"], params["ledger_id"]?.stringValue == ledgerID else { continue }
+            return GatewayTurnDecoder.approval(from: .init(id: id, method: "approval", params: params))
+        }
+        return nil
+    }
+
     enum CodingKeys: String, CodingKey {
         case ledgerID = "ledger_id", requestID = "request_id", gatewayID = "gateway_id"
         case profileID = "profile_id", sessionID = "session_id"

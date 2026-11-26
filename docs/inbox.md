@@ -386,8 +386,9 @@ The design also gives ⌥⌘↓ to "next mention"; in group chats the mention pi
   fills, and VoiceOver reads both choices ("This App", "Other Platforms, Unread").
 - **Needs You** shows open requests across connected profiles and gateways, including chats not
   open on this device. It refreshes on connect, when the app returns or the network comes back,
-  on request frames and every 30 seconds while visible. An approval in the list can be denied
-  by its exact ID. Requests show the Bot and chat when known, and a chat already represented by
+  on request frames and every 30 seconds while visible. An approval can be denied by its exact
+  ID or allowed once if the whole command is shown. Flagged approvals must be opened in their
+  chat, as must approvals whose live card could not be checked. Requests show the Bot and chat when known, and a chat already represented by
   its request doesn't repeat below the ledger. **Earlier** shows
   recent outcomes, who answered when known, and pages older results. A source that can't be
   checked is shown separately rather than counted as empty. Older gateways still show open
