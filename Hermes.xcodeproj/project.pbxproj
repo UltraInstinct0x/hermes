@@ -2351,7 +2351,7 @@
 				HERMES_SPARKLE_PUBLIC_KEY = "";
 				HERMES_URL_SCHEME = "hermesapp-dev";
 				INFOPLIST_FILE = App/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Hermes Neo";
+				INFOPLIST_KEY_CFBundleDisplayName = HermesNeo;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Take photos to share with Hermes and scan pairing codes to connect.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Confirm it’s you before approving a payment or anything that can’t be undone.";
@@ -2452,7 +2452,7 @@
 				HERMES_SPARKLE_PUBLIC_KEY = "IUPLRKpg3gIVLpvG7a59SUTYCB6j707Jwmk9oYNlP4c=";
 				HERMES_URL_SCHEME = hermesapp;
 				INFOPLIST_FILE = App/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Hermes Neo";
+				INFOPLIST_KEY_CFBundleDisplayName = HermesNeo;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Take photos to share with Hermes and scan pairing codes to connect.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Confirm it’s you before approving a payment or anything that can’t be undone.";

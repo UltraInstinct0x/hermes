@@ -110,7 +110,7 @@ targets:
         # (below). Info.plist's HermesICloudKeyValueSync says which, so it must match the entitlement.
         HERMES_ICLOUD_KEY_VALUE_SYNC: YES
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) HERMES_PUSH"
-        INFOPLIST_KEY_CFBundleDisplayName: Hermes Neo
+        INFOPLIST_KEY_CFBundleDisplayName: HermesNeo
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         INFOPLIST_KEY_NSHumanReadableCopyright: "© 2026 Caffeinated Code"
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Hermes connects to Hermes Agent gateways running on your local network."
@@ -150,7 +150,7 @@ targets:
         # Release (TestFlight / App Store) is the real "Hermes" and never touches demo data.
         Debug:
           PRODUCT_BUNDLE_IDENTIFIER: $(HERMES_APP_BUNDLE_ID)
-          INFOPLIST_KEY_CFBundleDisplayName: Hermes Neo
+          INFOPLIST_KEY_CFBundleDisplayName: HermesNeo
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIconDev
           HERMES_URL_SCHEME: hermesapp-dev
           # A Mac Debug build with the iCloud entitlement would need a development profile, which only
@@ -158,7 +158,7 @@ targets:
           "HERMES_ICLOUD_KEY_VALUE_SYNC[sdk=macosx*]": NO
         Release:
           PRODUCT_BUNDLE_IDENTIFIER: $(HERMES_APP_BUNDLE_ID)
-          INFOPLIST_KEY_CFBundleDisplayName: Hermes Neo
+          INFOPLIST_KEY_CFBundleDisplayName: HermesNeo
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
           # iOS releases sign by hand with the App Store profiles (Scripts/release.sh downloads them):
           # the app and its three extensions each have one. The Mac signs by hand with Developer ID
