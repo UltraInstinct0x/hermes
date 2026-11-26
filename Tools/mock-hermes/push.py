@@ -855,25 +855,12 @@ def install(backend_globals, gateway_module=None, relay_mode="simctl", gateway_n
             pending = backend_globals["PENDING"]
             rid = next((rid for rid, entry in pending.items() if entry["frame"]["method"] == "approval"
                         and entry["frame"]["params"].get("request_id") == request_id), None)
-            if rid is None:
-                return {"resolved": 0}
-            pending[rid]["result"] = {"choice": choice}
-            pending[rid]["event"].set()
-        return {"resolved": 1}
-
-    def request_answer(params):
-        rid = params.get("id") or ""
-        with backend_globals["LOCK"]:
-            entry = backend_globals["PENDING"].get(rid)
-            if entry is None:
-                return {"status": "expired"}
-            entry["result"] = params.get("result")
-            entry["event"].set()
-        return {"status": "ok"}
+        by = backend_globals["CURRENT"].peer.identity
+        row = backend_globals["LEDGER"].settle(rid, result={"choice": choice}, by=by, via="approval.respond")
+        return {"resolved": int(row is not None)}
 
     methods["command.dispatch"] = dispatch
     methods["approval.respond"] = approval_respond
-    methods["request.answer"] = request_answer
 
     def push_reply(query, body):
         # Mock-only: a finished reply's notice now, as if its turn ran long ({"text", "chat", "session_id",
@@ -957,48 +944,56 @@ def install(backend_globals, gateway_module=None, relay_mode="simctl", gateway_n
         runtime = backend_globals["RUNTIME"].get(sid) or {}
         stored = runtime.get("stored", "")
         log(f"{method} requested in {stored or sid}")
+        if method == "approval" and not params.get("request_id"):
+            params = {**params, "request_id": f"ap_{uuid.uuid4().hex[:6]}"}
         notice = None
-        expires = time.time() + timeout
-        if method == "approval":
-            request_id = params.get("request_id") or f"ap_{uuid.uuid4().hex[:6]}"
-            params = {**params, "request_id": request_id}
-            # The plugin hears a card fill's surface from Hermes's hook; the socket's frame doesn't carry
-            # it, so the mock knows web_turns.py's card fill by its command.
-            command = str(params.get("command", ""))
-            notice = notices.approval(request_id=request_id, session_id=stored, chat=chat_title(stored),
-                                      gateway_name=GATEWAY["name"], command=command,
-                                      description=params.get("description", ""),
-                                      choices=params.get("choices") or ["once", "deny"], expires_at=expires,
-                                      surface="vault-payment" if command.startswith("Fill payment card '") else "",
-                                      bot=bot_of(stored))
-            notice.extra["answer"] = {"via": "socket", "session_id": stored}
-            # Like the plugin: a card fill's Live Activity carries no request id (no Allow on the Lock Screen).
-            state = {"phase": "needsYou", "command": notice.extra["command"],
-                     "request_id": None if notices.opens_only(notice) else request_id,
-                     "started_at": (STATE["turns"].get(sid) or {}).get("start"),
-                     "expires_at": expires, "title": chat_title(stored), "answer": notice.extra["answer"]}
-        elif method == "clarify":
-            request_id = f"hi_{uuid.uuid4().hex[:8]}"
-            notice = notices.question(request_id=request_id, session_id=stored, chat=chat_title(stored),
-                                      gateway_name=GATEWAY["name"], questions=params.get("questions") or [],
-                                      prompt="", expires_at=expires, bot=bot_of(stored))
-            notice.extra["answer"] = {"via": "socket", "session_id": stored}
-            state = {"phase": "needsYou", "question": notice.body, "request_id": request_id, "title": chat_title(stored)}
-        elif method in ("sudo", "secret"):
-            request_id = f"hi_{uuid.uuid4().hex[:8]}"
-            notice = notices.password(request_id=request_id, session_id=stored, chat=chat_title(stored),
-                                      gateway_name=GATEWAY["name"], what=params.get("command", "") if method == "sudo" else "",
-                                      expires_at=expires)
-            state = {"phase": "needsYou", "question": "Needs a password", "request_id": request_id, "title": chat_title(stored)}
-        if notice is not None:
-            if profile_of(stored):
-                notice.extra["profile"] = profile_of(stored)
-            open_request(notice.request_id, {"kind": notice.kind, "session": stored, "expires_at": expires},
-                         alive=lambda: not (backend_globals["RUNTIME"].get(sid) or {}).get("dead"))
-            deliver(notice)
-            activity(stored, state, alert=True)
+
+        def publish(open_params):
+            nonlocal notice
+            expires = open_params.get("expires_at", time.time() + timeout)
+            if method == "approval":
+                request_id = open_params["request_id"]
+                # The plugin hears a card fill's surface from Hermes's hook; the socket's frame doesn't
+                # carry it, so the mock knows web_turns.py's card fill by its command.
+                command = str(open_params.get("command", ""))
+                notice = notices.approval(request_id=request_id, session_id=stored, chat=chat_title(stored),
+                                          gateway_name=GATEWAY["name"], command=command,
+                                          description=open_params.get("description", ""),
+                                          choices=open_params.get("choices") or ["once", "deny"], expires_at=expires,
+                                          surface="vault-payment" if command.startswith("Fill payment card '") else "",
+                                          bot=bot_of(stored))
+                notice.extra["answer"] = {"via": "socket", "session_id": stored}
+                # Like the plugin: a card fill's Live Activity carries no request id (no Allow on the Lock Screen).
+                state = {"phase": "needsYou", "command": notice.extra["command"],
+                         "request_id": None if notices.opens_only(notice) else request_id,
+                         "started_at": (STATE["turns"].get(sid) or {}).get("start"),
+                         "expires_at": expires, "title": chat_title(stored), "answer": notice.extra["answer"]}
+            elif method == "clarify":
+                request_id = f"hi_{uuid.uuid4().hex[:8]}"
+                notice = notices.question(request_id=request_id, session_id=stored, chat=chat_title(stored),
+                                          gateway_name=GATEWAY["name"], questions=open_params.get("questions") or [],
+                                          prompt="", expires_at=expires, bot=bot_of(stored))
+                notice.extra["answer"] = {"via": "socket", "session_id": stored}
+                state = {"phase": "needsYou", "question": notice.body, "request_id": request_id, "title": chat_title(stored)}
+            elif method in ("sudo", "secret"):
+                request_id = f"hi_{uuid.uuid4().hex[:8]}"
+                notice = notices.password(request_id=request_id, session_id=stored, chat=chat_title(stored),
+                                          gateway_name=GATEWAY["name"], expires_at=expires)
+                state = {"phase": "needsYou", "question": "Needs a password", "request_id": request_id, "title": chat_title(stored)}
+            if notice is not None:
+                profile = profile_of(stored)
+                if profile:
+                    notice.extra["profile"] = profile
+                if "ledger_id" in open_params:
+                    notice.extra.update(ledger_id=open_params["ledger_id"], deadline=expires,
+                                        gateway_id=backend_globals["LEDGER"].gateway_id, profile_id=profile or "default")
+                open_request(notice.request_id, {"kind": notice.kind, "session": stored, "expires_at": expires},
+                             alive=lambda: not (backend_globals["RUNTIME"].get(sid) or {}).get("dead"))
+                deliver(notice)
+                activity(stored, state, alert=True)
+
         try:
-            return original_request(sid, method, params, timeout)
+            return original_request(sid, method, params, timeout, on_open=publish)
         finally:
             if notice is not None:
                 withdraw([notice.request_id])

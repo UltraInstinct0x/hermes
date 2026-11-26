@@ -469,6 +469,7 @@ class Peer:
         self.write_lock = threading.Lock()
         self.alive = True
         self.answers_requests = False
+        self.identity = {"client_id": "unknown", "label": None, "kind": None}
         # /api/mock/freeze-sockets: the connection stays up but nothing comes back (no answers, no
         # events, no pongs), like a socket left half-open by a suspended app or a sleeping Mac.
         self.frozen = False
@@ -622,22 +623,39 @@ def emit(sid, kind, payload):
         peer.send({"jsonrpc": "2.0", "method": "event", "params": event})
 
 
-def server_request(sid, method, params, timeout=300):
+def server_request(sid, method, params, timeout=300, on_open=None):
     rid = f"srq-{uuid.uuid4().hex[:12]}"
+    params = {"session_id": sid, **params}
     entry = {"event": threading.Event(), "result": None, "sid": sid, "declined": set(), "frame": {
-        "jsonrpc": "2.0", "id": rid, "method": method, "params": {"session_id": sid, **params}}}
+        "jsonrpc": "2.0", "id": rid, "method": method, "params": params}}
     with LOCK:
+        entry["row"] = LEDGER.opened(rid, sid, method, params, timeout)
         PENDING[rid] = entry
         peers = [p for p in RUNTIME[sid]["peers"] if p in CLIENTS and p.answers_requests]
         entry["asked"] = set(peers)
-    for peer in peers:
-        peer.send(entry["frame"])
-    answered = entry["event"].wait(timeout)
-    with LOCK:
-        PENDING.pop(rid, None)
-    if not answered:
-        emit(sid, "request.cancel", {"id": rid, "method": method, "reason": "timeout"})
+    try:
+        if on_open:
+            on_open(params)
+        for peer in peers:
+            peer.send(entry["frame"])
+        if not entry["event"].wait(max(0, entry["row"]["expires_at"] - time.time())):
+            cancel_request(rid, "timeout", "expired")
+    except Exception:
+        cancel_request(rid, "mock_error", "cancelled")
+        raise
     return entry["result"]
+
+
+def cancel_request(rid, reason, state="withdrawn"):
+    with LOCK:
+        entry = PENDING.get(rid)
+        if entry is None:
+            return
+        row = LEDGER.settle(rid, state=state, reason=reason)
+    payload = {"id": rid, "method": row["kind"], "reason": reason}
+    if "ledger_id" in row:
+        payload["ledger_id"] = row["ledger_id"]
+    emit(entry["sid"], "request.cancel", payload)
 
 
 def open_requests(sid):
@@ -2424,12 +2442,11 @@ def method_session_interrupt(params):
         runtime["interrupt"] = True
         runtime["queue"] = []
         runtime.pop("steers", None)
-        cancelled = [(rid, e) for rid, e in PENDING.items() if e["sid"] == sid]
-    for rid, entry in cancelled:
-        entry["event"].set()
+        cancelled = [rid for rid, e in PENDING.items() if e["sid"] == sid]
+    for rid in cancelled:
         # Each open request is withdrawn under its own method (`server_requests.cancel`). An approval gets
         # no `approval.cancelled` here: withdrawing the request already took it off Hermes's queue.
-        emit(sid, "request.cancel", {"id": rid, "method": entry["frame"]["method"], "reason": "interrupted"})
+        cancel_request(rid, "interrupted")
     return {"status": "interrupted"}
 
 
@@ -2651,6 +2668,10 @@ class Handler(BaseHTTPRequestHandler):
         wait_out_stall()
         if url.path == "/api/ws":
             return self.websocket(query)
+        if url.path == f"/gw/{LEDGER.gateway_id}/api/ws":
+            if self.headers.get("Authorization") != f"Bearer {CONFIG['token']}":
+                return self.send_json(403, {"error": {"code": "forbidden", "message": "Forbidden"}})
+            return self.websocket(query, device_authorized=True)
         if url.path in WS_ROUTES:
             return WS_ROUTES[url.path](self, query)
         if url.path == "/api/status":
@@ -2687,7 +2708,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(html)))
             self.end_headers()
             return self.wfile.write(html)
-        if not self.authorized():
+        if url.path in ("/bff/ledger", "/bff/ledger/history"):
+            token = CONFIG["token"]
+            if self.cookies().get("bff_device") != token and self.headers.get("Authorization") != f"Bearer {token}":
+                return self.send_json(401, {"error": {"code": "unauthorized", "message": "Unauthorized"}})
+        elif not self.authorized():
             return self.send_json(401, {"detail": "Unauthorized"})
         if url.path == "/api/files/stream" and "FILE_STREAM" in globals():
             return FILE_STREAM(self, query)  # audio.py: Range requests
@@ -2924,6 +2949,8 @@ class Handler(BaseHTTPRequestHandler):
                     runtime["running"] = False
                     runtime["inflight"] = None
                     runtime["peers"] = set()
+                for rid in list(PENDING):
+                    LEDGER.settle(rid, state="lost_on_restart")
             for peer in peers:
                 peer.cut()
             return self.send_json(200, {"ok": True, "dropped": len(peers)})
@@ -2952,17 +2979,20 @@ class Handler(BaseHTTPRequestHandler):
             # Hermes settles it: no event to the clients still showing its card (`RequestSync`).
             with LOCK:
                 wanted = body.get("method")
-                rid = next((r for r in reversed(list(PENDING)) if not wanted or PENDING[r]["frame"]["method"] == wanted), None)
-                entry = PENDING.pop(rid, None) if rid else None
-            if entry is None:
-                return self.send_json(404, {"detail": "No open request"})
-            method = entry["frame"]["method"]
-            questions = entry["frame"]["params"].get("questions") or []
-            default = ({"choice": "once", "all": False} if method == "approval" else
-                       {"answers": {q.get("qid", ""): (q.get("choices") or ["Yes"])[0] for q in questions}} if method == "clarify" else
-                       {"value": ""})
-            entry["result"] = body.get("result") or default
-            entry["event"].set()
+                key = body.get("ledger_id")
+                rid = next((r for r, e in reversed(list(PENDING.items()))
+                            if (not wanted or e["frame"]["method"] == wanted)
+                            and (not key or e["row"].get("ledger_id") == key)), None)
+                if rid is None:
+                    return self.send_json(404, {"detail": "No open request"})
+                entry = PENDING[rid]
+                method = entry["frame"]["method"]
+                questions = entry["frame"]["params"].get("questions") or []
+                default = ({"choice": "once", "all": False} if method == "approval" else
+                           {"answers": {q.get("qid", ""): (q.get("choices") or ["Yes"])[0] for q in questions}}
+                           if method == "clarify" else {"value": ""})
+                LEDGER.settle(rid, result=body.get("result") or default, by=body.get("answered_by"),
+                              via="external", notify=False)
             return self.send_json(200, {"ok": True, "id": rid, "method": method})
         if url.path == "/api/mock/lose-answer":
             # Mock-only: the next request for `method` loses its answer and the socket is cut, after
@@ -3066,12 +3096,12 @@ class Handler(BaseHTTPRequestHandler):
                 return True
         return False
 
-    def websocket(self, query):
+    def websocket(self, query, device_authorized=False):
         key = self.headers.get("Sec-WebSocket-Key")
         if not key or (self.headers.get("Upgrade") or "").lower() != "websocket":
             return self.send_json(400, {"detail": "Expected a WebSocket upgrade"})
         accept = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
-        authorized = self.authorized(query)
+        authorized = device_authorized or self.authorized(query)
         self.wfile.write((f"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                           f"Sec-WebSocket-Accept: {accept}\r\n\r\n").encode())
         self.wfile.flush()
@@ -3112,26 +3142,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         rid, method = frame.get("id"), frame.get("method")
         if method is None and rid is not None:
-            with LOCK:
-                entry = PENDING.get(rid)
-                if entry is None:
-                    return
-                if "error" in frame:
+            if "error" in frame:
+                with LOCK:
+                    entry = PENDING.get(rid)
+                    if entry is None:
+                        return
                     # A "not shown here" decline settles only once every asked client said so.
                     entry["declined"].add(peer)
                     if entry["declined"] >= entry["asked"]:
-                        entry["result"] = None
-                        entry["event"].set()
-                else:
-                    # Like Hermes' `resolve_response`: the first answer settles the request and nobody
-                    # else is told; a later answer to the same id is dropped without a word.
-                    PENDING.pop(rid, None)
-                    entry["result"] = frame.get("result")
-                    entry["event"].set()
+                        LEDGER.settle(rid, state="cancelled", reason="not_shown")
+            else:
+                LEDGER.settle(rid, result=frame.get("result"), by=peer.identity, via="frame")
             return
-        if method == "client.capabilities":
-            peer.answers_requests = bool((frame.get("params") or {}).get("server_requests"))
-            return peer.send(ok(rid, {"server_requests": ["approval", "clarify", "sudo", "secret"]}))
         handler = METHODS.get(method)
         if handler is None:
             return peer.send(err(rid, -32601, f"unknown method: {method}"))
@@ -3420,6 +3442,10 @@ def main():
         _web_turns = _util.module_from_spec(_spec)
         _spec.loader.exec_module(_web_turns)
         _web_turns.install(globals(), gateway, chats, _vault)
+    _spec = _util.spec_from_file_location("mock_ledger", _pathlib.Path(__file__).resolve().parent / "ledger.py")
+    _ledger = _util.module_from_spec(_spec)
+    _spec.loader.exec_module(_ledger)
+    globals()["LEDGER"] = _ledger.Ledger(globals())
     _spec = _util.spec_from_file_location("mock_push", _pathlib.Path(__file__).resolve().parent / "push.py")
     _push = _util.module_from_spec(_spec)
     _spec.loader.exec_module(_push)

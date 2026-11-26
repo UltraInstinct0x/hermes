@@ -680,6 +680,7 @@ class Push:
             notice.extra["answer"] = answer
         _tag_profile(notice)
         notice.extra["answerable"] = answer is not None
+        _tag_ledger(notice, extra)
         self.store.open_request(request_id, {"kind": "approval", "session": chat_session, "key": session_key,
                                              "expires_at": expires_at})
         self.deliver(notice)
@@ -708,7 +709,7 @@ class Push:
             self._activity(chat_session, state, force=True)
 
     def on_human_input_request(self, kind: str = "", request_id: str = "", session_id: str = "",
-                               session_key: str = "", prompt: str = "", **_: Any) -> None:
+                               session_key: str = "", prompt: str = "", **extra: Any) -> None:
         if kind == "approval" or not request_id:
             return
         session = session_key or session_id
@@ -725,12 +726,12 @@ class Push:
                 # The app answers through the session's open requests (``session.resume`` → ``request.answer``).
                 notice.extra["answer"] = {"via": "socket", "session_id": session}
             _tag_profile(notice)
+            _tag_ledger(notice, extra)
             step = notice.body
-        else:  # a password or other value prompt: never the value, only what it's for
+        else:
             expires_at = time.time() + (120 if kind == "sudo" else 300)
             notice = notices.password(request_id=request_id, session_id=session, chat=chat,
-                                      gateway_name=self.gateway_name(), what=prompt if kind == "sudo" else "",
-                                      expires_at=expires_at)
+                                      gateway_name=self.gateway_name(), expires_at=expires_at)
             step = "Needs a password"
         self.store.open_request(request_id, {"kind": notice.kind, "session": session, "expires_at": expires_at})
         self.deliver(notice)
@@ -1100,6 +1101,15 @@ def _tag_profile(notice: notices.Notice) -> None:
     profile = _profile()
     if profile:
         notice.extra["profile"] = profile
+
+
+def _tag_ledger(notice: notices.Notice, event: dict) -> None:
+    ids = {key: event.get(key) for key in ("ledger_id", "gateway_id", "profile_id")}
+    deadline = event.get("deadline", event.get("expires_at"))
+    if all(isinstance(value, str) and value for value in ids.values()):
+        notice.extra.update(ids)
+        if type(deadline) in (int, float) and 0 < deadline < float("inf"):
+            notice.extra["deadline"] = deadline
 
 
 def _answerable_here() -> bool:
