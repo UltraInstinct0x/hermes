@@ -210,7 +210,7 @@ public actor GatewaySocket {
 
     /// Opens the socket, waits for `gateway.ready`, and opts into server requests
     /// (without `client.capabilities` approvals are never delivered).
-    public func connect() async throws {
+    public func connect(receivesServerRequests: Bool = true) async throws {
         guard task == nil else { return }
         guard !isFinished else { throw Failure.closed("Disconnected from the Hermes backend.") }
         var upgrade = URLRequest(url: url)
@@ -236,7 +236,7 @@ public actor GatewaySocket {
                 try await group.next()
             }
             isOpen = true
-            try await advertiseCapabilities()
+            try await advertiseCapabilities(receivesServerRequests: receivesServerRequests)
         } catch {
             // A socket that never got going must not keep its receive loop or heartbeat.
             shutdown(error: error)
@@ -244,8 +244,8 @@ public actor GatewaySocket {
         }
     }
 
-    private func advertiseCapabilities() async throws {
-        let baseline: [String: JSONValue] = ["server_requests": .bool(true)]
+    private func advertiseCapabilities(receivesServerRequests: Bool) async throws {
+        let baseline: [String: JSONValue] = ["server_requests": .bool(receivesServerRequests)]
         if let clientIdentity {
             var params = baseline
             params["client_id"] = .string(clientIdentity.id)

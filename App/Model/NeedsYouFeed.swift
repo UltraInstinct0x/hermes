@@ -131,7 +131,7 @@ final class NeedsYouFeed {
         .init(id: id, client: .init { method, params in
             try await Self.withRoute(route) { try await $0(method, params) }
         }, legacy: {
-            try await Self.withRoute(route) { request in
+            try await Self.withRoute(route, readOnly: true) { request in
                 let listing = try await request("session.list", [
                     "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
                 ])
@@ -149,17 +149,21 @@ final class NeedsYouFeed {
     }
 
     private static func withRoute<T: Sendable>(
-        _ route: Route, perform: @Sendable (@escaping RequestLedgerClient.Transport) async throws -> T
+        _ route: Route, readOnly: Bool = false, perform: @Sendable (@escaping RequestLedgerClient.Transport) async throws -> T
     ) async throws -> T {
+        let socket: GatewaySocket
         switch route {
         case .direct(let roster):
-            return try await perform { try await roster.request($0, $1, timeout: .seconds(10)) }
+            if !readOnly {
+                return try await perform { try await roster.request($0, $1, timeout: .seconds(10)) }
+            }
+            socket = GatewaySocket(url: try await roster.backendClient.gatewaySocketURL())
         case .box(let backend, let alias):
-            let socket = try await backend.ledgerSocket(gatewayID: alias, identity: .hermesApp)
-            defer { Task { await socket.close() } }
-            try await socket.connect()
-            return try await perform { try await socket.request($0, $1, timeout: .seconds(10)) }
+            socket = try await backend.ledgerSocket(gatewayID: alias, identity: .hermesApp)
         }
+        defer { Task { await socket.close() } }
+        try await socket.connect(receivesServerRequests: !readOnly)
+        return try await perform { try await socket.request($0, $1, timeout: .seconds(10)) }
     }
 
     func canDeny(_ row: LedgerRow) -> Bool {
