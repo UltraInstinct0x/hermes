@@ -1,3 +1,4 @@
+#if !os(watchOS)
 @preconcurrency import AVFAudio
 import Foundation
 
@@ -246,3 +247,4 @@ private final class ObserverTokens: @unchecked Sendable {
         }
     }
 }
+#endif

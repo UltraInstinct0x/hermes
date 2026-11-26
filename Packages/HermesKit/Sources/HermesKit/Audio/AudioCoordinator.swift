@@ -1,3 +1,4 @@
+#if !os(watchOS)
 import Foundation
 import os
 
@@ -375,3 +376,4 @@ public struct AudioLogEntry: Sendable, Equatable, CustomStringConvertible {
         }
     }
 }
+#endif
