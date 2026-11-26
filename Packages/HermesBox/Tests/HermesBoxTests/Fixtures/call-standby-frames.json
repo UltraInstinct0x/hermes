@@ -1,0 +1,29 @@
+{
+  "note": "Shared samples: box/call-hub/tests/standby-fixture.test.mjs runs the hub's validateStandbyFrame over them, CallStandbyTests.swift decodes the same frames. valid is the hub's verdict; swift.decodes is what CallInbound.parse yields (standby with its flag, or none when the frame is refused).",
+  "frames": [
+    {
+      "name": "standby on",
+      "valid": true,
+      "swift": { "decodes": "standby", "on": true },
+      "frame": { "type": "call.standby", "call_id": "11111111-2222-4333-8444-555555555555", "on": true, "at": 1700000000000 }
+    },
+    {
+      "name": "standby off",
+      "valid": true,
+      "swift": { "decodes": "standby", "on": false },
+      "frame": { "type": "call.standby", "call_id": "11111111-2222-4333-8444-555555555555", "on": false, "at": 1700000000001 }
+    },
+    {
+      "name": "on must be a boolean",
+      "valid": false,
+      "swift": { "decodes": "none" },
+      "frame": { "type": "call.standby", "call_id": "11111111-2222-4333-8444-555555555555", "on": "yes", "at": 1700000000002 }
+    },
+    {
+      "name": "call id is required",
+      "valid": false,
+      "swift": { "decodes": "none" },
+      "frame": { "type": "call.standby", "on": true, "at": 1700000000003 }
+    }
+  ]
+}
