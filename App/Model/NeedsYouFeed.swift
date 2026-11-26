@@ -55,6 +55,7 @@ final class NeedsYouFeed {
     @ObservationIgnored private var routes: [LedgerRow.ID: Route] = [:]
     @ObservationIgnored private var cursors: [HistoryRoute: Cursor] = [:]
     @ObservationIgnored private var boxWorkspaces: Set<UUID> = []
+    @ObservationIgnored private var boxLiveSources: [UUID: Set<LedgerSource.ID>] = [:]
     @ObservationIgnored private var refreshing = false
     @ObservationIgnored private var needsRefresh = false
 
@@ -66,6 +67,7 @@ final class NeedsYouFeed {
             needsRefresh = false
             var routing: [LedgerRow.ID: Route] = [:]
             var boxes: Set<UUID> = []
+            var liveBoxSources: [UUID: Set<LedgerSource.ID>] = [:]
             var snapshots: [LedgerSnapshot] = []
             for workspace in workspaces {
                 guard let roster = workspace.roster, !Task.isCancelled else { continue }
@@ -75,6 +77,7 @@ final class NeedsYouFeed {
                     if let box = try await backend.federatedLedger() {
                         snapshots.append(box)
                         boxes.insert(workspace.id)
+                        liveBoxSources[workspace.id] = Set((box.sources ?? []).filter { $0.state == .live }.map(\.id))
                         for row in box.open {
                             if let alias = row.gatewayID { routing[row.id] = .box(backend, alias) }
                         }
@@ -108,7 +111,12 @@ final class NeedsYouFeed {
                 workspace.ledgerSources = merged.sources ?? []
             }
             routes = routing
+            for (workspaceID, live) in liveBoxSources where !live.isSubset(of: boxLiveSources[workspaceID] ?? []) {
+                cursors.removeValue(forKey: .box(workspaceID))
+            }
             boxWorkspaces = boxes
+            boxLiveSources = liveBoxSources
+            updateMoreHistory(workspaces)
         } while needsRefresh && !Task.isCancelled
     }
 
@@ -208,12 +216,10 @@ final class NeedsYouFeed {
         loadingHistory = true
         defer { loadingHistory = false }
         var rows: [LedgerRow] = []
-        var choices: Set<HistoryRoute> = []
         for workspace in workspaces {
             guard let roster = workspace.roster else { continue }
             if boxWorkspaces.contains(workspace.id) {
                 let key = HistoryRoute.box(workspace.id)
-                choices.insert(key)
                 if case .end? = cursors[key] { continue }
                 let before: String?
                 if case .box(let cursor)? = cursors[key] { before = cursor } else { before = nil }
@@ -226,7 +232,6 @@ final class NeedsYouFeed {
                     guard let profile = source.id.profileID,
                           workspace.ledgerSources.contains(where: { $0.id == source.id && $0.state == .live }) else { continue }
                     let key = HistoryRoute.direct(source.id)
-                    choices.insert(key)
                     if case .end? = cursors[key] { continue }
                     let before: TimeInterval?
                     if case .direct(let cursor)? = cursors[key] { before = cursor } else { before = nil }
@@ -239,6 +244,17 @@ final class NeedsYouFeed {
         }
         var seen: Set<LedgerRow.ID> = []
         earlier = (earlier + rows).sorted { $0.createdAt > $1.createdAt }.filter { seen.insert($0.id).inserted }
+        updateMoreHistory(workspaces)
+    }
+
+    private func updateMoreHistory(_ workspaces: [BotWorkspace]) {
+        let choices: [HistoryRoute] = workspaces.flatMap { workspace in
+            if boxWorkspaces.contains(workspace.id) {
+                return boxLiveSources[workspace.id]?.isEmpty == false ? [.box(workspace.id)] : []
+            }
+            return workspace.ledgerSources.filter { $0.state == .live && $0.profileID != nil }
+                .map { .direct($0.id) }
+        }
         moreHistory = choices.contains { key in
             if case .end? = cursors[key] { return false }
             return true
