@@ -12,13 +12,23 @@ final class RequestCardUITests: XCTestCase {
     }
 
     @MainActor
-    func testNeedsYouShowsRequestsAcrossChats() async throws {
+    func testNeedsYouAcrossChatsBeforeAnswering() async throws {
         _ = try await seedNeedsYouApprovals()
-        let app = try await showNeedsYou()
-        for profile in ["default", "writer"] {
-            XCTAssertTrue(denyButton(in: app, profile: profile).waitForExistence(timeout: 25))
+        for appearance in ["light", "dark"] {
+            let app = try await showNeedsYou(["-appearance", appearance])
+            for profile in ["default", "writer"] {
+                XCTAssertTrue(denyButton(in: app, profile: profile).waitForExistence(timeout: 25))
+            }
+            let approvals = app.staticTexts.matching(identifier: "needsYou.request")
+                .matching(NSPredicate(format: "label == 'Approval'"))
+            XCTAssertEqual(approvals.count, 2, "The two open approvals should only appear under Needs You")
+            let loadEarlier = app.buttons["Load Earlier"]
+            XCTAssertTrue(loadEarlier.waitForExistence(timeout: 10))
+            loadEarlier.tap()
+            XCTAssertTrue(loadEarlier.waitForNonExistence(timeout: 10))
+            XCTAssertEqual(approvals.count, 2, "History paging must not add open approvals to Earlier")
+            attachScreenshot("needs-you-before-answering-\(appearance)")
         }
-        attachScreenshot("needs-you-across-chats")
     }
 
     @MainActor
@@ -100,8 +110,8 @@ final class RequestCardUITests: XCTestCase {
     }
 
     @MainActor
-    private func showNeedsYou() async throws -> XCUIApplication {
-        let app = try await launch(["-HERMES_OPEN", "bots"])
+    private func showNeedsYou(_ arguments: [String] = []) async throws -> XCUIApplication {
+        let app = try await launch(["-HERMES_OPEN", "bots"] + arguments)
         let chats = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Chats'")).firstMatch
         if !chats.isHittable {
             let back = app.navigationBars.buttons.element(boundBy: 0)
