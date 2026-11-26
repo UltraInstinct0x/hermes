@@ -45,20 +45,20 @@ final class WatchPhoneRelay: NSObject, WCSessionDelegate {
             var hasUnavailableGateway = false
             for gateway in model.bots {
                 guard let roster = model.workspaces[gateway.id]?.roster else { continue }
-                if !roster.isConnected { roster.connectIfNeeded(quietly: true) }
-                if !roster.isConnected || !roster.hasLiveList { hasUnavailableGateway = true }
+                let isLive = await roster.prepareForWatchRead()
+                if !isLive { hasUnavailableGateway = true }
                 bots += (roster.visibleBots + roster.hiddenBots).map { profile in
                     WatchCompanion.Bot(
                         id: .init(gateway: gateway.id, profile: profile.name),
                         title: profile.title, gatewayName: gateway.name,
-                        state: !roster.isConnected ? .offline : roster.isBusy(profile.name) ? .working : .idle
+                        state: !isLive ? .offline : roster.isBusy(profile.name) ? .working : .idle
                     )
                 }
             }
             return .roster(bots, hasUnavailableGateway: hasUnavailableGateway)
         case .latestReply(let id):
             guard let roster = model.workspaces[id.gateway]?.roster else { return .botNotFound }
-            guard roster.isConnected, roster.hasLiveList else { return .unavailable }
+            guard await roster.prepareForWatchRead() else { return .unavailable }
             guard roster.bot(named: id.profile) != nil else { return .botNotFound }
             do {
                 guard let chatID = try await roster.resolveBotChat(id.profile) else { return .latestReply(nil) }
