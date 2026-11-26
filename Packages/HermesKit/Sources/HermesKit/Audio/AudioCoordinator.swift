@@ -145,6 +145,12 @@ public actor AudioCoordinator {
         defer { unlock() }
         switch event {
         case .interruptionBegan:
+            // Nothing holds the audio (CallKit deactivating a call that already let go): there's
+            // nothing to pause, and no end will follow to clear it.
+            guard active != nil || !suspended.isEmpty else {
+                record(.interruption(began: true), owner: "-")
+                return
+            }
             interrupted = true
             record(.interruption(began: true), owner: active?.owner ?? "-")
             active?.send(.paused(.interruption))
@@ -161,7 +167,7 @@ public actor AudioCoordinator {
                 return
             }
             // A call carries on after a phone call; Listen and playback only when the system says so.
-            if shouldResume || active.role == .talk {
+            if shouldResume || active.role == .talk || active.role == .call {
                 active.send(.resumed)
             }
         case .routeChanged(let change):
@@ -224,9 +230,15 @@ public actor AudioCoordinator {
             if !interrupted { lease.send(.resumed) }
             return
         }
-        guard applied != nil else { return }
+        guard let last = applied else { return }
         applied = nil
-        await platform.deactivate(graph: graph)
+        interrupted = false
+        if last.systemActivation != nil {
+            // CallKit deactivates its own session when its call ends; the app only stops the engine.
+            graph.stop()
+        } else {
+            await platform.deactivate(graph: graph)
+        }
         record(.deactivated, owner: "-")
     }
 
