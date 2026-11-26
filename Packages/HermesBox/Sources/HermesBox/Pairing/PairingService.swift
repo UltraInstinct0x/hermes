@@ -44,6 +44,28 @@ public struct PairingService: Sendable {
         return PairedBox(baseURL: baseURL, hasDeviceToken: result.deviceToken != nil)
     }
 
+    /// Hermes Neo: pair on the owner's gateway login (`POST /bff/pair/gateway`) instead of a link. The device token is
+    /// kept where a redeemed one is (the Keychain, then the Bearer of every request). An answer without one is a
+    /// failure: the box must hand this phone its own credential.
+    public func pairWithGateway(baseURL: URL, credentialHeaders: [String: String]) async throws -> PairedBox {
+        let client = BFFClient(baseURL: baseURL, transport: transport)
+        let result = try await client.pairWithGateway(credentialHeaders: credentialHeaders, deviceLabel: deviceLabel)
+        guard let token = result.deviceToken else {
+            throw BFFError.undecodable(detail: "/bff/pair/gateway answered without a deviceToken")
+        }
+        try secrets.write(baseURL.absoluteString, account: SecretAccount.boxBaseURL)
+        try secrets.write(token, account: SecretAccount.deviceToken)
+        return PairedBox(baseURL: baseURL, hasDeviceToken: true)
+    }
+
+    /// Hermes Neo: which gateway login the stored pairing was made with (a one-way fingerprint, never the login), so a
+    /// changed login pairs again.
+    public func gatewayFingerprint() -> String? { try? secrets.read(SecretAccount.gatewayFingerprint) }
+
+    public func rememberGatewayFingerprint(_ fingerprint: String) {
+        try? secrets.write(fingerprint, account: SecretAccount.gatewayFingerprint)
+    }
+
     /// The box this phone is paired with, if any.
     public func load() throws -> PairedBox? {
         guard let text = try secrets.read(SecretAccount.boxBaseURL), let url = URL(string: text) else { return nil }
@@ -69,5 +91,6 @@ public struct PairingService: Sendable {
     public func forget() throws {
         try secrets.delete(SecretAccount.boxBaseURL)
         try secrets.delete(SecretAccount.deviceToken)
+        try secrets.delete(SecretAccount.gatewayFingerprint)
     }
 }

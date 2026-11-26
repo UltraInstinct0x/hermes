@@ -182,6 +182,16 @@ public struct BFFClient: Sendable {
         return RedeemResult(responseBody: data)
     }
 
+    /// `POST /bff/pair/gateway` (Hermes Neo): the box pairs this phone on the owner's gateway login instead of a
+    /// pairing link. `credentialHeaders` are the gateway credential exactly as the app sends it to that gateway
+    /// (`X-Hermes-Session-Token`, or its `Cookie`). The answer has the shape of redeem's: `{ok, device, deviceToken}`.
+    /// 403: the login was refused (429 after repeats); 502: the gateway could not be reached.
+    public func pairWithGateway(credentialHeaders: [String: String], deviceLabel: String) async throws -> RedeemResult {
+        let body = try JSONEncoder().encode(["deviceLabel": deviceLabel, "client": "ios"])
+        let data = try await send(path: "/bff/pair/gateway", method: "POST", body: body, headers: credentialHeaders)
+        return RedeemResult(responseBody: data)
+    }
+
     // MARK: plumbing
 
     func get<T: Decodable>(_ path: String) async throws -> T {
@@ -193,7 +203,7 @@ public struct BFFClient: Sendable {
         }
     }
 
-    func send(path: String, method: String, body: Data?) async throws -> Data {
+    func send(path: String, method: String, body: Data?, headers: [String: String] = [:]) async throws -> Data {
         guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL else {
             throw BFFError.undecodable(detail: "bad path \(path)")
         }
@@ -206,6 +216,7 @@ public struct BFFClient: Sendable {
         }
         // A native client sends no Origin header, so the BFF's CSRF check passes (box/bff server.mjs).
         request = await authorizer.authorize(request)
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
 
         let data: Data
         let response: HTTPURLResponse

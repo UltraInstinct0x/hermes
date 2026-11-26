@@ -68,6 +68,20 @@ struct VoIPRegistrarTests {
         #expect(registrar.statusLine == "On. Your bots can ring this phone.")
     }
 
+    @Test func aBoxThatRefusesTheDeviceCredentialIsReportedSoTheAppPairsAgain() async {
+        let box = FakeCallOwnerBox()
+        box.registerError = BFFError.envelope(code: "unauthorized", message: "", status: 401)
+        let registrar = VoIPRegistrar(environment: "sandbox", topic: "t", store: InMemoryCallsFromBots(enabled: true))
+        var refusals = 0
+        registrar.onUnauthorized = { refusals += 1 }
+        registrar.attach(box)
+        await registrar.tokenReceived(fakeToken)
+        #expect(refusals == 1)
+        box.registerError = BFFError.unreachable(detail: "offline")
+        await registrar.retry()
+        #expect(refusals == 1, "a box out of reach is not a refusal")
+    }
+
     @Test func theTokenCarriesThisAppsBundleIdAsItsTopic() async {
         let box = FakeCallOwnerBox()
         let registrar = VoIPRegistrar(environment: "sandbox", topic: "dev.supersaiyan.hermesneo", store: InMemoryCallsFromBots(enabled: true))

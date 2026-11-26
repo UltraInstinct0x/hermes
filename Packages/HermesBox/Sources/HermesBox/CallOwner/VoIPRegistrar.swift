@@ -30,6 +30,9 @@ public final class VoIPRegistrar {
     @ObservationIgnored private let topic: String?
     @ObservationIgnored private var api: (any CallOwnerServing)?
     @ObservationIgnored private var token: String?
+    /// Hermes Neo: the box refused this phone's device credential (401 or 403). The app drops it, so the next
+    /// attempt pairs again on the gateway login.
+    @ObservationIgnored public var onUnauthorized: (@MainActor () -> Void)?
 
     public init(
         environment: String, topic: String? = Bundle.main.bundleIdentifier, store: any CallsFromBotsStoring = InMemoryCallsFromBots()
@@ -98,6 +101,7 @@ public final class VoIPRegistrar {
             registeredOnBox = voip
         } catch {
             // The status is a nicety: a box out of reach keeps the last answer.
+            noteRefusal(error)
         }
     }
 
@@ -116,6 +120,7 @@ public final class VoIPRegistrar {
             testSentence = CallOwnerCopy.testSentence(try await api.testRing())
         } catch {
             testFailure = CallOwnerCopy.testFailure(error)
+            noteRefusal(error)
         }
     }
 
@@ -146,6 +151,7 @@ public final class VoIPRegistrar {
             failure = nil
         } catch {
             failure = CalmFailure(sentence: CallOwnerCopy.registerFailed, details: "voip register: \(error)", retry: .reconnect)
+            noteRefusal(error)
         }
     }
 
@@ -165,6 +171,17 @@ public final class VoIPRegistrar {
         } catch {
             // The token stays on the box for now; it is dropped there when Apple says it is dead, or on the next change.
             failure = CalmFailure(sentence: CallOwnerCopy.unregisterFailed, details: "voip unregister: \(error)", retry: .reconnect)
+            noteRefusal(error)
+        }
+    }
+
+    /// 401 or 403 from the box: its device credential for this phone is no good any more.
+    private func noteRefusal(_ error: any Error) {
+        switch error {
+        case BFFError.envelope(_, _, 401), BFFError.envelope(_, _, 403), BFFError.unexpectedStatus(401), BFFError.unexpectedStatus(403):
+            onUnauthorized?()
+        default:
+            break
         }
     }
 }

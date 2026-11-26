@@ -91,4 +91,6 @@ public enum SecretAccount {
     public static let boxBaseURL = "box.base-url"
     /// The R2 device token, when the BFF returned one.
     public static let deviceToken = "device.token"
+    /// Hermes Neo: a SHA-256 of the gateway login the device token was issued for.
+    public static let gatewayFingerprint = "gateway.fingerprint"
 }

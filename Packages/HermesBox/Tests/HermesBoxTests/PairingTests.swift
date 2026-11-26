@@ -72,6 +72,53 @@ struct PairingServiceTests {
         try BoxPairingLink.parse("\(base.absoluteString)/pair#\(fakeToken)").get()
     }
 
+    @Test func pairingOnTheGatewayLoginSendsItsCredentialAndKeepsTheDeviceTokenAsTheBearer() async throws {
+        let box = StubURLProtocol.box { request in
+            request.path == "/bff/pair/gateway"
+                ? .json(#"{"ok":true,"device":{"id":"d-7","label":"HermesNeo"},"deviceToken":"TEST-ONLY-gateway-device-token"}"#)
+                : .json(#"{"ok":true,"gateways":[]}"#)
+        }
+        let secrets = InMemorySecretStore()
+        let service = PairingService(transport: box.transport, secrets: secrets, deviceLabel: "HermesNeo")
+        let paired = try await service.pairWithGateway(baseURL: box.baseURL, credentialHeaders: ["X-Hermes-Session-Token": "TEST-ONLY-session"])
+        #expect(paired.baseURL == box.baseURL && paired.hasDeviceToken)
+        let call = try #require(StubURLProtocol.requests(host: box.host).first)
+        #expect(call.method == "POST" && call.path == "/bff/pair/gateway")
+        #expect(call.header("X-Hermes-Session-Token") == "TEST-ONLY-session")
+        #expect(call.header("Authorization") == nil, "no device token yet")
+        #expect(call.bodyJSON?["deviceLabel"] as? String == "HermesNeo")
+        #expect(call.bodyJSON?["client"] as? String == "ios")
+        #expect(try secrets.read(SecretAccount.deviceToken) == "TEST-ONLY-gateway-device-token")
+        #expect(try service.load() == paired)
+
+        let client = BFFClient(baseURL: box.baseURL, transport: box.transport, authorizer: service.authorizer())
+        _ = try await client.gateways()
+        let later = try #require(StubURLProtocol.requests(host: box.host).last)
+        #expect(later.header("Authorization") == "Bearer TEST-ONLY-gateway-device-token")
+        #expect(later.header("X-Hermes-Session-Token") == nil, "the gateway login goes to the box only to pair")
+    }
+
+    @Test func aRefusedGatewayLoginStoresNothing() async throws {
+        let box = StubURLProtocol.box { _ in .json(#"{"ok":false,"error":{"code":"forbidden","message":"login refused"}}"#, status: 403) }
+        let secrets = InMemorySecretStore()
+        let service = PairingService(transport: box.transport, secrets: secrets, deviceLabel: "HermesNeo")
+        await #expect(throws: BFFError.envelope(code: "forbidden", message: "login refused", status: 403)) {
+            _ = try await service.pairWithGateway(baseURL: box.baseURL, credentialHeaders: ["Cookie": "hermes_session_at=a; hermes_session_rt=b"])
+        }
+        #expect(secrets.accounts.isEmpty)
+        #expect(try service.load() == nil)
+    }
+
+    @Test func anAnswerWithoutADeviceTokenIsAFailure() async throws {
+        let box = StubURLProtocol.box { _ in .json(#"{"ok":true,"device":{"id":"d-7","label":"HermesNeo"}}"#) }
+        let secrets = InMemorySecretStore()
+        let service = PairingService(transport: box.transport, secrets: secrets, deviceLabel: "HermesNeo")
+        await #expect(throws: BFFError.self) {
+            _ = try await service.pairWithGateway(baseURL: box.baseURL, credentialHeaders: ["X-Hermes-Session-Token": "t"])
+        }
+        #expect(secrets.accounts.isEmpty)
+    }
+
     @Test func redeemPostsTheTokenOnceWithClientIosAndNoOriginHeader() async throws {
         let box = StubURLProtocol.box { _ in .json(#"{"ok":true,"device":{"id":"d-123","label":"Test iPhone"}}"#, headers: ["Set-Cookie": "bff_device=cookie-value; Path=/; HttpOnly; Secure"]) }
         let secrets = InMemorySecretStore()
