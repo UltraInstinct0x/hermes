@@ -66,6 +66,16 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
     }
 
     func deactivate() throws {
+        giveBack()
+    }
+
+    /// A CallKit call ended: CallKit deactivates its session; the role goes back to the coordinator,
+    /// so Talk, dictation and the rest can have the audio again.
+    func systemSessionEnded() {
+        giveBack()
+    }
+
+    private func giveBack() {
         stop()
         let acquiring = acquiring
         let lease = lease

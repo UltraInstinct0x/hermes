@@ -37,10 +37,14 @@ public protocol AudioSessionDriver: AnyObject {
     /// S27: set the category and mode for `purpose` WITHOUT activating the session. CallKit activates it (and tells the
     /// app in `provider(_:didActivate:)`); an app that activates it itself before that gets a silent call.
     func configure(_ purpose: AudioPurpose) throws
+    /// Hermes Neo: a CallKit call is over here. The session stays CallKit's to deactivate, but whatever the app holds
+    /// for it (the coordinator's `.call` role) is given back.
+    func systemSessionEnded()
 }
 
 extension AudioSessionDriver {
     public func configure(_ purpose: AudioPurpose) throws {}
+    public func systemSessionEnded() {}
 }
 
 /// Owns the one audio session of the app: who holds it, hand-over between dictation and speech, and the
@@ -106,6 +110,7 @@ public final class VoiceAudioSession {
         holder = nil
         if isSystemActivated {
             isSystemActivated = false
+            driver.systemSessionEnded()
             return
         }
         try? driver.deactivate()

@@ -274,6 +274,10 @@ final class FakeAudioDriver: AudioSessionDriver {
         configurations.append(purpose)
     }
 
+    /// Hermes Neo: a CallKit call ended here (its session is CallKit's to deactivate).
+    private(set) var systemSessionEnds = 0
+    func systemSessionEnded() { systemSessionEnds += 1 }
+
     func events() -> AsyncStream<AudioSessionEvent> {
         let (stream, continuation) = AsyncStream.makeStream(of: AudioSessionEvent.self)
         self.continuation = continuation

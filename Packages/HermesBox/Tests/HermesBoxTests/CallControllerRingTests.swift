@@ -111,6 +111,26 @@ struct CallControllerRingTests {
         #expect(!rig.controller.isInCall)
         #expect(rig.ended == [testCallId])
         #expect(rig.driver.deactivations == 0, "CallKit deactivates its own session")
+        #expect(rig.driver.systemSessionEnds == 1, "Hermes Neo: the app's hold on the audio is given back once")
+    }
+
+    /// Hermes Neo: after an answered call ends, the app's hold on the audio (AudioCoordinator's `.call` role) goes back
+    /// exactly once, while the session itself stays CallKit's to deactivate.
+    @Test func anAnsweredCallThatEndsGivesTheAudioBackOnce() async {
+        let rig = RingRig()
+        let answer = Task { await rig.controller.answerRing(bot: rig.bot, callId: testCallId, timeout: .seconds(20)) }
+        await settle()
+        rig.controller.systemAudioActivated()
+        await rig.hubAnswers()
+        #expect(await outcome(of: answer) == .answered)
+        #expect(rig.driver.systemSessionEnds == 0, "held while the call runs")
+        rig.controller.end()
+        #expect(await until { rig.time.sleeperCount >= 1 })
+        await rig.time.advance(by: .seconds(3))
+        #expect(await until { !rig.controller.isInCall })
+        #expect(rig.driver.systemSessionEnds == 1)
+        #expect(rig.driver.deactivations == 0 && rig.driver.activations.isEmpty)
+        #expect(rig.audioSession.holder == nil)
     }
 
     @Test func noTakeWithinTheTimeoutFailsTheAnswer() async {
