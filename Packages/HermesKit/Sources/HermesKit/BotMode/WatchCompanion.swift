@@ -42,8 +42,17 @@ public enum WatchCompanion {
         }
     }
 
-    public static func latestReply(in messages: [SessionMessage]) -> String? {
-        for item in TranscriptBuilder.build(messages, hidesSilence: true).reversed() {
+    public static func latestReply(in messages: [SessionMessage], hasEarlier: Bool = false) -> String? {
+        let items = TranscriptBuilder.build(messages, hidesSilence: true)
+        // A turn at the page boundary might be echoing a delivery on an earlier page.
+        let complete = hasEarlier ? items.drop(while: { item in
+            switch item {
+            case .assistant: true
+            case .user(let entry): entry.isSteer
+            default: false
+            }
+        }) : items[...]
+        for item in complete.reversed() {
             guard case .assistant(let turn) = item, !turn.answer.isEmpty else { continue }
             let limit = 2_000
             let preview = String(turn.answer.unicodeScalars.prefix(limit))

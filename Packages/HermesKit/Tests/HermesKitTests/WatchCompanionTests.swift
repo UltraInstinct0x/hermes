@@ -63,3 +63,22 @@ import Testing
     #expect(reply.runs.contains { $0.inlinePresentationIntent == .code })
     #expect(reply.runs.allSatisfy { $0.link == nil })
 }
+
+@Test func watchReplyWaitsForARoutineDeliveryOnThePreviousPage() {
+    let brief = """
+        The nightly backup completed successfully and no files were skipped. The archive contains
+        all shared documents, photos and settings. Verification compared checksums against the
+        source, and the previous weekly snapshot is still available in cold storage.
+        """
+    let delivery = SessionMessage(role: "user", content: .text(
+        "[Cronjob \"Backup\" output — scheduled job, not the user. Review it, act on anything that needs action, and summarize for the chat.]\n\n" + brief
+    ), displayKind: "internal_notification")
+    let echo = SessionMessage(role: "assistant", content: .text(brief))
+    let earlier = SessionMessage(role: "assistant", content: .text("Earlier answer"))
+    #expect(WatchCompanion.latestReply(in: [echo], hasEarlier: true) == nil)
+    #expect(WatchCompanion.latestReply(in: [earlier, delivery, echo]) == "Earlier answer")
+    #expect(WatchCompanion.latestReply(in: [earlier, delivery, echo], hasEarlier: true) == nil)
+    let question = SessionMessage(role: "user", content: .text("Anything else?"))
+    let answer = SessionMessage(role: "assistant", content: .text("Nothing else."))
+    #expect(WatchCompanion.latestReply(in: [echo, question, answer], hasEarlier: true) == "Nothing else.")
+}

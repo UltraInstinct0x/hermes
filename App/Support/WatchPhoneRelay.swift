@@ -72,7 +72,7 @@ final class WatchPhoneRelay: NSObject, WCSessionDelegate {
                         return .unavailable
                     }
                     messages = page.messages + messages
-                    if let reply = WatchCompanion.latestReply(in: messages) {
+                    if let reply = WatchCompanion.latestReply(in: messages, hasEarlier: page.hasEarlier) {
                         return .latestReply(reply)
                     }
                     guard page.hasEarlier, !page.messages.isEmpty else { return .latestReply(nil) }
