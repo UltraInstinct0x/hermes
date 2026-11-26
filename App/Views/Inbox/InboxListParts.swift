@@ -13,7 +13,7 @@ struct NeedsYouRows: View {
                 SidebarSectionTitle(title: String(localized: "Needs You"))
                 ForEach(snapshot.open) { row in
                     entry(row, detail: feed.receipts[row.id]) {
-                        if feed.canOpenLocally(row) {
+                        if feed.localWorkspace(for: row, in: app) != nil {
                             Button("Open Chat") { feed.openLocalChat(row, app: app, window: windowID) }
                         }
                         if feed.canDeny(row) {

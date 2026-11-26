@@ -197,22 +197,35 @@ final class NeedsYouFeed {
     }
 
     func openLocalChat(_ row: LedgerRow, app: AppModel, window: UUID?) {
-        guard case .direct(let roster)? = routes[row.id],
-              let workspace = app.workspaces.values.first(where: { $0.roster === roster }),
-              let session = row.sessionID else { return }
+        guard let workspace = localWorkspace(for: row, in: app), let session = row.sessionID else { return }
         app.select(workspace.id, in: window)
-        if let bot = roster.bot(named: row.profile), bot.canonicalSession?.resolvedID == session {
+        let profile = row.profileID ?? row.profile
+        if let bot = workspace.roster?.bot(named: profile),
+           bot.canonicalSession.map({ $0.id == session || $0.resolvedID == session }) == true {
             workspace.sidebarMode = .bots
-            workspace.selection = .bot(row.profile)
+            workspace.selection = .bot(profile)
         } else {
             workspace.sidebarMode = .chats
             workspace.selection = .session(workspace.unreadKey(forStoredSession: session))
         }
     }
 
-    func canOpenLocally(_ row: LedgerRow) -> Bool {
-        guard case .direct? = routes[row.id] else { return false }
-        return row.sessionID != nil
+    func localWorkspace(for row: LedgerRow, in app: AppModel) -> BotWorkspace? {
+        guard let session = row.sessionID else { return nil }
+        switch routes[row.id] {
+        case .direct(let roster):
+            return app.workspaces.values.first { $0.roster === roster }
+        case .box:
+            let profile = row.profileID ?? row.profile
+            let matches = app.workspaces.values.filter { workspace in
+                guard let roster = workspace.roster, let bot = roster.bot(named: profile) else { return false }
+                return bot.canonicalSession.map { $0.id == session || $0.resolvedID == session } == true
+                    || workspace.allSessions.contains { $0.id == session || $0.stableID == session }
+            }
+            return matches.count == 1 ? matches.first : nil
+        case nil:
+            return nil
+        }
     }
 
     func loadEarlier(_ workspaces: [BotWorkspace]) async {
