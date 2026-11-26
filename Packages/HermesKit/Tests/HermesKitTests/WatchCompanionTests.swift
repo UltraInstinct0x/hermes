@@ -82,3 +82,29 @@ import Testing
     let answer = SessionMessage(role: "assistant", content: .text("Nothing else."))
     #expect(WatchCompanion.latestReply(in: [echo, question, answer], hasEarlier: true) == "Nothing else.")
 }
+
+@Test func watchReplyReplacesWidgetDirectivesBeforeSendingPreview() {
+    let text = """
+        Here is the result.
+
+        ::widget{id="w_backup1" alt="Backup completed"}
+
+        ::widget{id="w_backup2"}
+
+        ```
+        ::widget{id="w_example"}
+        ```
+        """
+    let message = SessionMessage(role: "assistant", content: .text(text))
+    #expect(WatchCompanion.latestReply(in: [message]) == """
+        Here is the result.
+
+        Backup completed
+
+        View this card in Hermes on your iPhone.
+
+        ```
+        ::widget{id="w_example"}
+        ```
+        """)
+}

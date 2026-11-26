@@ -54,11 +54,25 @@ public enum WatchCompanion {
         }) : items[...]
         for item in complete.reversed() {
             guard case .assistant(let turn) = item, !turn.answer.isEmpty else { continue }
+            let text = watchReplyText(turn.answer)
             let limit = 2_000
-            let preview = String(turn.answer.unicodeScalars.prefix(limit))
-            return preview == turn.answer ? preview : preview + "…"
+            let preview = String(text.unicodeScalars.prefix(limit))
+            return preview == text ? preview : preview + "…"
         }
         return nil
+    }
+
+    private static func watchReplyText(_ answer: String) -> String {
+        let fallback = String(localized: "View this card in Hermes on your iPhone.")
+        return ReplySplitter.split(answer, inlineWidgets: true).map { segment in
+            switch segment {
+            case .markdown(let markdown): markdown
+            case .widget(let directive): directive.alt ?? fallback
+            case .inline(let json): json["fallback_text"]?.stringValue ?? fallback
+            case .typed(let json): ReplySplitter.typedWords(json) ?? fallback
+            case .unreadable: fallback
+            }
+        }.joined(separator: "\n\n")
     }
 
     public static func gatewayLabels(for bots: [Bot]) -> [BotID: String] {

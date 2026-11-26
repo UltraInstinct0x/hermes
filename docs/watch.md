@@ -9,13 +9,14 @@ or credentials.
 The list shows Bots from the iPhone's configured Bot Mode gateways, including hidden Bots and
 known Bots on disconnected gateways. Each row shows the Bot's name and whether it is idle,
 working or offline. A gateway name is shown when Bots on different gateways share a name, unless
-the gateway name repeats the Bot's name. The Watch reads again when it comes to the foreground or regains its phone
-connection. Tap Refresh to read again while it stays open. If the phone has not loaded a
-gateway's roster yet, open Hermes on the phone and refresh after the roster loads.
+the gateway name repeats the Bot's name. The Watch reads again when it comes to the foreground
+or regains its phone connection. Tap Refresh to read again while it stays open. If the phone has
+not loaded a gateway's roster yet, open Hermes on the phone and refresh after the roster loads.
 
 Tap a Bot to read its latest visible assistant answer from its permanent Bot Chat. The Watch
-formats Markdown as readable text with inert links and shortens long answers. Opening a reply doesn't create a chat or mark it
-read. It doesn't show approvals or notices, send messages, or take calls.
+formats Markdown with inert links, shows a text fallback for cards, and shortens long answers.
+Opening a reply doesn't create a chat or mark it read. It doesn't show approvals or notices,
+send messages, or take calls.
 
 The companion uses interactive WatchConnectivity requests. The iPhone reads its existing
 `BotRoster` and reuses the Bot Chat lookup and stored transcript API from
