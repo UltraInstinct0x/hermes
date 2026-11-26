@@ -61,13 +61,20 @@ enum PushResponder {
             // Allow goes only to what the notification showed: never a command Hermes's safety check
             // flagged or a card fill, never one shown as the bare fallback (the extension didn't
             // run). Those open the chat, where the card shows it whole (and asks for Face ID).
-            if allows, notice.smartDenied || notice.isPaymentFill || Self.fallbackBodies.contains(response.shownBody)
-                || !showed(notice, body: response.shownBody, center: center) {
+            if notice.smartDenied || notice.isPaymentFill || (allows && (
+                !(notice.isMemorySave ? notice.savesInBanner : notice.answersInBanner)
+                || Self.fallbackBodies.contains(response.shownBody)
+                || !showed(notice, body: response.shownBody, center: center))) {
                 center.open(notice)
                 return
             }
             await answer(notice, center: center, identifier: response.identifier) {
-                try await approve(notice, choice: allows ? .once : .deny, center: center)
+                let choice: ApprovalChoice = allows ? .once : .deny
+                if let ledgerID = notice.ledgerID {
+                    try await approveLedger(notice, ledgerID: ledgerID, choice: choice, center: center)
+                } else {
+                    try await approve(notice, choice: choice, center: center)
+                }
             }
         case NotificationCatalog.Action.reply:
             let text = response.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -118,11 +125,27 @@ enum PushResponder {
             if let request = notice.requestID { await center.removeDelivered(requests: [request]) }
             await center.refreshBadge()
         } catch {
+            let failure = error as? Failure
+            if ((notice.kind == .question || notice.ledgerID != nil) && failure == .expired) || failure == .answerInApp {
+                center.open(notice)
+            }
             await reportFailure(notice, error: error, center: center)
         }
     }
 
     // MARK: - Approvals
+
+    @MainActor
+    private static func approveLedger(_ notice: PushNotice, ledgerID: String, choice: ApprovalChoice, center: PushCenter) async throws {
+        guard !ledgerID.isEmpty, !notice.isExpired() else { throw Failure.expired }
+        let (workspace, _) = try gateway(for: notice, center: center)
+        try await withLedgerSocket(notice, workspace: workspace) { request in
+            let client = RequestLedgerClient(transport: request)
+            let answer = try await client.answer(ledgerID: ledgerID, profile: notice.profileID ?? notice.profile,
+                                                 result: ["choice": .string(choice.rawValue)])
+            if case .noLongerPending = answer { throw Failure.expired }
+        }
+    }
 
     @MainActor
     static func approve(_ notice: PushNotice, choice: ApprovalChoice, center: PushCenter) async throws {
@@ -178,34 +201,37 @@ enum PushResponder {
 
     // MARK: - Questions
 
-    /// A `clarify` answer: the open request is found through the session's resume snapshot (the
-    /// plugin's request id is the human-input id, not the socket request's), then answered.
+    /// A `clarify` answer uses the exact request's question ids, never its displayed text.
     @MainActor
     static func answerQuestion(_ notice: PushNotice, with text: String, center: PushCenter) async throws {
-        if notice.isExpired() { throw Failure.expired }
+        guard !notice.isExpired(), let id = notice.ledgerID ?? notice.requestID, !id.isEmpty else {
+            throw Failure.expired
+        }
         let (workspace, _) = try gateway(for: notice, center: center)
-        let session = notice.answer?.sessionID ?? notice.chatID ?? ""
-        _ = try await withSocket(workspace) { request in
-            var resume: [String: JSONValue] = ["session_id": .string(session), "omit_messages": .bool(true)]
-            if let profile = notice.profile { resume["profile"] = .string(profile) }
-            let snapshot = try await request("session.resume", resume)
-            guard case .array(let open)? = snapshot["open_requests"] else { throw Failure.expired }
-            let questions = open.compactMap { row -> HermesRequest? in
-                guard let id = row["id"]?.stringValue, row["method"]?.stringValue == "clarify" else { return nil }
-                return HermesRequest.parse(GatewayServerRequest(id: id, method: "clarify", params: row["params"] ?? .object([:])))
+        try await withLedgerSocket(notice, workspace: workspace) { request in
+            let client = RequestLedgerClient(transport: request)
+            let profile = notice.profileID ?? notice.profile
+            let exact: GatewayServerRequest
+            if notice.ledgerID != nil {
+                let ledger = try await client.list(profile: profile ?? "default", gatewayID: notice.gatewayID ?? "")
+                guard let questions = ExactClarifyAnswer.questions(in: ledger, ledgerID: id),
+                      questions.allSatisfy({ $0["qid"]?.stringValue?.isEmpty == false }) else { throw Failure.expired }
+                exact = GatewayServerRequest(id: id, method: "clarify", params: .object(["questions": .array(questions)]))
+            } else {
+                guard let session = notice.answer?.sessionID ?? notice.chatID, !session.isEmpty else { throw Failure.expired }
+                var resume: [String: JSONValue] = ["session_id": .string(session), "omit_messages": .bool(true)]
+                if let profile { resume["profile"] = .string(profile) }
+                let snapshot = try await request("session.resume", resume)
+                guard let legacy = ExactClarifyAnswer.request(in: snapshot, requestID: id) else { throw Failure.expired }
+                exact = legacy
             }
-            let wanted = notice.questions.first?.question ?? notice.body
-            guard let target = questions.first(where: { request in
-                if case .clarify(let items) = request.kind { return items.first?.question == wanted }
-                return false
-            }) ?? questions.first, case .clarify(let items) = target.kind else { throw Failure.expired }
-            var answers: [String: JSONValue] = [:]
-            for (index, item) in items.enumerated() {
-                answers[item.id] = index == 0 ? .string(text) : .null
+            guard let target = HermesRequest.parse(exact), case .clarify(let items) = target.kind else {
+                throw Failure.expired
             }
-            let answered = try await request("request.answer", ["id": .string(target.id), "result": .object(["answers": .object(answers)])])
-            if answered["status"]?.stringValue == "expired" { throw Failure.expired }
-            return answered
+            guard items.count == 1, !items[0].multiSelect else { throw Failure.answerInApp }
+            let answer = try await client.answer(ledgerID: id, profile: notice.ledgerID == nil ? nil : profile,
+                                                 result: ["answers": .object([items[0].id: .string(text)])])
+            if case .noLongerPending = answer { throw Failure.expired }
         }
     }
 
@@ -269,11 +295,28 @@ enum PushResponder {
         return (workspace, model.apiKey(for: workspace.bot))
     }
 
-    typealias Request = (_ method: String, _ params: [String: JSONValue]) async throws -> JSONValue
+    typealias Request = RequestLedgerClient.Transport
+
+    @MainActor
+    private static func withLedgerSocket<Result>(
+        _ notice: PushNotice, workspace: BotWorkspace, _ body: @MainActor (@escaping Request) async throws -> Result
+    ) async throws -> Result {
+        guard notice.ledgerID != nil, let alias = notice.gatewayID else {
+            return try await withSocket(workspace, body)
+        }
+        guard let link = workspace.bot.backend else { throw Failure.noBackend }
+        let backend = workspace.roster?.backendClient ?? BackendClient(
+            baseURL: link.url, credential: PushCenter.shared.model?.backendCredential(for: workspace.bot)
+        )
+        let socket = try await backend.ledgerSocket(gatewayID: alias, identity: .hermesApp)
+        defer { Task { await socket.close() } }
+        try await socket.connect()
+        return try await body { method, params in try await socket.request(method, params, timeout: .seconds(20)) }
+    }
 
     /// The gateway's backend socket: the live one if it's up, else a fresh one just for this.
     @MainActor
-    static func withSocket(_ workspace: BotWorkspace, _ body: (Request) async throws -> JSONValue) async throws -> JSONValue {
+    static func withSocket<Result>(_ workspace: BotWorkspace, _ body: @MainActor (@escaping Request) async throws -> Result) async throws -> Result {
         guard let roster = workspace.roster else { throw Failure.noBackend }
         if roster.state.isOnline {
             return try await body { method, params in try await roster.request(method, params, timeout: .seconds(20)) }
@@ -290,12 +333,12 @@ enum PushResponder {
         guard let link = workspace.bot.backend else { throw Failure.noBackend }
         let client = BackendClient(baseURL: link.url, credential: PushCenter.shared.model?.backendCredential(for: workspace.bot))
         do {
-            let socket = GatewaySocket(url: try await client.gatewaySocketURL())
+            let socket = GatewaySocket(url: try await client.gatewaySocketURL(), clientIdentity: .hermesApp)
             try await socket.connect()
             return socket
         } catch where link.signIn == .automatic {
             _ = try await client.discoverSessionToken()
-            let socket = GatewaySocket(url: try await client.gatewaySocketURL())
+            let socket = GatewaySocket(url: try await client.gatewaySocketURL(), clientIdentity: .hermesApp)
             try await socket.connect()
             return socket
         }
