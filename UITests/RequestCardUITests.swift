@@ -16,8 +16,11 @@ final class RequestCardUITests: XCTestCase {
         _ = try await seedNeedsYouApprovals()
         for appearance in ["light", "dark"] {
             let app = try await showNeedsYou(["-appearance", appearance])
-            for profile in ["default", "writer"] {
-                XCTAssertTrue(denyButton(in: app, profile: profile).waitForExistence(timeout: 25))
+            for (bot, chat) in [("Hermes", "Build log"), ("Ada", "Release draft")] {
+                let card = app.cells.containing(.staticText, identifier: chat).firstMatch
+                XCTAssertTrue(card.buttons["needsYou.deny"].waitForExistence(timeout: 25))
+                XCTAssertTrue(card.buttons["needsYou.allow"].exists)
+                XCTAssertTrue(card.staticTexts[bot].exists)
             }
             let approvals = app.staticTexts.matching(identifier: "needsYou.request")
                 .matching(NSPredicate(format: "label == 'Approval'"))
@@ -33,10 +36,35 @@ final class RequestCardUITests: XCTestCase {
 
     @MainActor
     func testNeedsYouDeniesOnlyTheSelectedUnattachedRequest() async throws {
+        try await answerOnlySelectedApproval(action: "deny", outcome: "deny", screenshot: "needs-you-answer-receipt")
+    }
+
+    @MainActor
+    func testNeedsYouAllowsOnlyTheSelectedUnattachedRequest() async throws {
+        try await answerOnlySelectedApproval(action: "allow", outcome: "once", screenshot: "needs-you-approve-receipt")
+    }
+
+    @MainActor
+    func testNeedsYouFlaggedApprovalOnlyOpensItsChat() async throws {
+        _ = try await seedNeedsYouApprovals(flagged: true)
+        let app = try await showNeedsYou()
+        let safe = app.cells.containing(.staticText, identifier: "Release draft").firstMatch
+        let flagged = app.cells.containing(.staticText, identifier: "Release review").firstMatch
+        XCTAssertTrue(safe.buttons["needsYou.allow"].waitForExistence(timeout: 25))
+        XCTAssertTrue(flagged.buttons["Open Chat"].waitForExistence(timeout: 25))
+        XCTAssertTrue(flagged.staticTexts["Ada"].exists)
+        XCTAssertFalse(flagged.buttons["needsYou.allow"].exists)
+        XCTAssertFalse(flagged.buttons["needsYou.deny"].exists)
+        flagged.buttons["Open Chat"].tap()
+        XCTAssertTrue(element(app, "label CONTAINS[c] 'Release review'").waitForExistence(timeout: 10))
+    }
+
+    @MainActor
+    private func answerOnlySelectedApproval(action: String, outcome: String, screenshot: String) async throws {
         let sessions = try await seedNeedsYouApprovals()
         let app = try await showNeedsYou()
-        let selected = denyButton(in: app, profile: "writer")
-        let other = denyButton(in: app, profile: "default")
+        let selected = app.cells.containing(.staticText, identifier: "Release draft").buttons["needsYou.\(action)"]
+        let other = app.cells.containing(.staticText, identifier: "Build log").buttons["needsYou.\(action)"]
         XCTAssertTrue(selected.waitForExistence(timeout: 25))
         XCTAssertTrue(other.waitForExistence(timeout: 25))
 
@@ -57,14 +85,14 @@ final class RequestCardUITests: XCTestCase {
         XCTAssertTrue(after["open"]?.contains { ($0["ledger_id"] as? String) == otherID } == true)
         XCTAssertFalse(after["open"]?.contains { ($0["ledger_id"] as? String) == selectedID } == true)
         let settled = try XCTUnwrap(after["recent"]?.first { ($0["ledger_id"] as? String) == selectedID })
-        XCTAssertEqual(settled["outcome"] as? String, "deny")
+        XCTAssertEqual(settled["outcome"] as? String, outcome)
         let winner = try XCTUnwrap((settled["answered_by"] as? [String: Any])?["label"] as? String)
         XCTAssertEqual(receipt.label, "Answered by \(winner)")
-        attachScreenshot("needs-you-answer-receipt")
+        attachScreenshot(screenshot)
     }
 
     @MainActor
-    private func seedNeedsYouApprovals() async throws -> [String: String] {
+    private func seedNeedsYouApprovals(flagged: Bool = false) async throws -> [String: String] {
         let stopped = try await mock("stop-turns", [:])
         XCTAssertEqual(stopped, 200)
         let (backend, token) = try await mockBackend()
@@ -88,11 +116,14 @@ final class RequestCardUITests: XCTestCase {
 
         _ = try await call("client.capabilities", ["server_requests": true])
         var sessions: [String: String] = [:]
-        for profile in ["default", "writer"] {
-            let chat = try await call("session.create", ["profile": profile])
+        let fixtures = flagged
+            ? [("writer", "Release draft", "approve"), ("writer", "Release review", "approve flagged")]
+            : [("default", "Build log", "approve"), ("writer", "Release draft", "approve")]
+        for (profile, title, prompt) in fixtures {
+            let chat = try await call("session.create", ["profile": profile, "title": title])
             let runtime = try XCTUnwrap(chat["session_id"] as? String)
             sessions[profile] = try XCTUnwrap(chat["stored_session_id"] as? String)
-            _ = try await call("prompt.submit", ["session_id": runtime, "text": "approve"])
+            _ = try await call("prompt.submit", ["session_id": runtime, "text": prompt])
         }
         return sessions
     }
@@ -125,11 +156,6 @@ final class RequestCardUITests: XCTestCase {
         filter.tap()
         element(app, "label BEGINSWITH 'Needs You'").tap()
         return app
-    }
-
-    @MainActor
-    private func denyButton(in app: XCUIApplication, profile: String) -> XCUIElement {
-        app.cells.containing(.staticText, identifier: profile).buttons["needsYou.deny"]
     }
 
     @MainActor
