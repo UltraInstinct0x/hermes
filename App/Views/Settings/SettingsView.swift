@@ -81,6 +81,11 @@ private struct SettingsList: View {
                 }
                 #endif
 
+                #if os(iOS)
+                // Hermes Neo: your box and calls from your bots (App/Calls).
+                NeoCallsSettingsSection()
+                #endif
+
                 AboutSection()
             }
             .formStyle(.grouped)

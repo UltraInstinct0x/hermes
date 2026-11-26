@@ -9,7 +9,7 @@
 /* Begin PBXBuildFile section */
 		001DBDA178379735F849569C /* CommandViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BA130514841F895F341DD77 /* CommandViews.swift */; };
 		02479417E466AEA3D884A0ED /* CodeTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8037ADEB48C6AD7870A4F59 /* CodeTextView.swift */; };
-		0255BA676231B67BE5885A2B /* HermesMacSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 0CCEEDE69065A76C92D5F1E8 /* HermesMacSupport */; };
+		0255BA676231B67BE5885A2B /* HermesBox in Frameworks */ = {isa = PBXBuildFile; platformFilters = (ios, ); productRef = 39A4FEF6EAB702FC4446EDED /* HermesBox */; };
 		056E0C03632F60A159C949FA /* BoardChatNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A80281BFE3580AB2A5C2537 /* BoardChatNote.swift */; };
 		0598875A55C228D94C09934D /* PluginProfilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34C884FE6D52DB3AA7608E2F /* PluginProfilesView.swift */; };
 		06519A331E1BA2BA15CC4984 /* SearchPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62249440A00899D4CBDCB679 /* SearchPalette.swift */; };
@@ -37,6 +37,7 @@
 		1E46D1B7FD920F998788F4B1 /* RemoteImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23AD683C8EEECDC0558E71CB /* RemoteImage.swift */; };
 		1E75843BD92DF5E116D855C9 /* GatewayJobView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1478CE26C0C38DDA9CABDC /* GatewayJobView.swift */; };
 		201AF65BA7D28F4AD433BF12 /* SidebarChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AB786670227F23BE604A7E7 /* SidebarChrome.swift */; };
+		205B77E2FC04A2DE9364BFD7 /* NeoCallAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36D235010F9C7E0916A0E600 /* NeoCallAudio.swift */; };
 		20623955B4DCDBFFB4F07A3D /* BoardModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BF0637C55B964A45E3D01AA /* BoardModel.swift */; };
 		20A2038E7DD4EA336624CFF1 /* SetupOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 838A0DCB68F713AD1796A723 /* SetupOverviewView.swift */; };
 		20ED0A86CBE0F1AE0BC95301 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64008DDC964C1C69C8B394C9 /* MarkdownView.swift */; };
@@ -50,18 +51,23 @@
 		26B2F9C1CF1EFD0CC091ED2C /* InspectorPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65B9564D89AC2C89465B2578 /* InspectorPresentation.swift */; };
 		272FAD243753B4895A349322 /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 49A26C4633CBC4FA0472A87C /* ActivityKit.framework */; };
 		2781B9569789A85414C563C4 /* Motion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDCAA78C61AB4467E72E5E0F /* Motion.swift */; };
+		279941BF0D0F443A97D97D43 /* NeoCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 669AEBCFF7AF2D84DA942996 /* NeoCallView.swift */; };
 		27DD7454BE98B6CA58EFAAF1 /* CollectionsWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B91EC7B4089F5244378F93 /* CollectionsWidgets.swift */; };
 		2844DE478DC20C304214FB36 /* GetHermesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4253B4FEA70130FBFFE796F8 /* GetHermesView.swift */; };
 		298957203B1DDD4665C6731E /* MarkdownCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A3335030C10A5603C9C2486 /* MarkdownCache.swift */; };
 		2AAA4D62BA1EE61C263E5FED /* BoardSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24EAFC5D6AD081C17F3CD302 /* BoardSheets.swift */; };
 		2AEDECE2D48FEF145B68E092 /* BoardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4CB0F5734C690D94D5C94A /* BoardParts.swift */; };
 		2BC8D4A47D5F4B9E5C861875 /* WidgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372077C3F7916FBB006563EB /* WidgetView.swift */; };
+		2CA5AAD0DE2D18037F177F17 /* NeoCallsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5144DCD1B7C8D30FEC44272D /* NeoCallsSettings.swift */; };
+		2CA9F9268DF64E6F677B149D /* hermes-ring.caf in Resources */ = {isa = PBXBuildFile; fileRef = 1A746A39FF36F7A828F6272B /* hermes-ring.caf */; };
 		2CDCD7D12F6F20451550637F /* NewChatComposerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 482FA8388891E6768541ABD4 /* NewChatComposerUITests.swift */; };
 		2D17C956E128D49C1EB89CCD /* HermesMarkPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58216F3283638D4CA643E82E /* HermesMarkPath.swift */; };
 		2DC3776495C4F68E39D3297D /* ConnectionsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A985699450F23889560E3E /* ConnectionsComponents.swift */; };
 		2E56D21615803B8B726D385C /* FollowUpTranscript.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF8F5504ABF1AFEDBCC0CA7B /* FollowUpTranscript.swift */; };
+		2EB2AC65EC457CF307259F83 /* NeoBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D5EE8E1FD55C341E67D585A /* NeoBox.swift */; };
 		2EF1608288D92A95F6B36798 /* RoutineRunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95903E53FFB93FF78A51B5C3 /* RoutineRunsView.swift */; };
 		2EF1C70E5D0E3B06DA39D1A0 /* InAppBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 051BBAB74DF737552E1D84A6 /* InAppBrowser.swift */; };
+		2F02E2840ECDD7E2426774DA /* NeoPushKitHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = A271054342E54B7FD509C99D /* NeoPushKitHost.swift */; };
 		2F59B36716D07F568EC101EF /* BotRosterSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF2AD4B883A16048295A1357 /* BotRosterSections.swift */; };
 		2FC461A61E458E3ED9FFB15B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 25C62148CB914F130DA29402 /* PrivacyInfo.xcprivacy */; };
 		30EB674218A48778D4DAF5E7 /* ProjectEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 052812AB04960140C29154F8 /* ProjectEditorSheet.swift */; };
@@ -143,8 +149,10 @@
 		68BADADC2DB85D4B337D7FCD /* PriorityGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = EACF39E5928B0D874FC0CD68 /* PriorityGallery.swift */; };
 		68C181FF81413ABCCCB03A54 /* MacSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB1960694B7A5F36E4F79E1 /* MacSettingsView.swift */; };
 		69003CBCF349B25033273BCC /* NotificationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 062CA9DC49F4E08C7055959E /* NotificationViewController.swift */; };
+		697CA4D1ED8881D3EAC5679B /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 0EF800A31CAF7FB36EEDB794 /* WebRTC */; };
 		6A076582013F177C093F67AD /* TalkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F38DF3765EFC53376F148EEE /* TalkView.swift */; };
 		6A33CCD6B11FC60D6A3270AE /* MemoryChatViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00F509B5DBD669F7AA2E736 /* MemoryChatViews.swift */; };
+		6AB666810F7ADC6DBFFD25A7 /* NeoCallKitHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFC702E1F625F6E9F066736 /* NeoCallKitHost.swift */; };
 		6AF564FBE420E5E43FA5F787 /* ChatSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 832AE24D1F65FAF1CD8E69DF /* ChatSearch.swift */; };
 		6B0380B5F5B1DC89E5E66795 /* PluginComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E7CD891FDBE3C7248CBECFA /* PluginComponents.swift */; };
 		6C68940B53D9FC3FB44AB75E /* WindowRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2195C5DC577A37D518BC540 /* WindowRouter.swift */; };
@@ -297,13 +305,14 @@
 		D067DCFC1B318C37EFE3C03A /* AnswerFromActivityIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A526CB3D525BDF1E197EEFBC /* AnswerFromActivityIntent.swift */; };
 		D09B73680678CAC041EEF8F6 /* WidgetBodyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF0B379533853643EB37ECD /* WidgetBodyView.swift */; };
 		D26A0D659D895D1E0D3C7BAC /* DynamicColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A04B5C1D40414750FC712E /* DynamicColor.swift */; };
+		D2B84962BC7209B8CC693F7E /* BoxPairingScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37A3FB30E9A386B90F82710F /* BoxPairingScanner.swift */; };
 		D371DD5DD9F4006A25DD0D1E /* ReplyTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3D0CA7A8235C4B72F2D1585 /* ReplyTextView.swift */; };
 		D456CC48B7297D0F3E7E80ED /* GatewaySwitcherUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E0BDA8AE672244126A2D971 /* GatewaySwitcherUITests.swift */; };
 		D4BCCDD0BBD1A880DA1F9418 /* ScreenController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4075AD831B58AF230A738A85 /* ScreenController.swift */; };
 		D7B104DB46D5B2D360EED23E /* SetupViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F64F1CA13067D78A8E375D18 /* SetupViews.swift */; };
 		D7D72F02DE8256F23E1D558B /* SlashCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE747DB99EB241BB0E0625DC /* SlashCatalog.swift */; };
 		D8C6962FD039AB25D4E10AA6 /* ClipPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC289A9F418A109A87A2C587 /* ClipPlayer.swift */; };
-		DA5E96BF599013B2D1B8F4E8 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 0EF800A31CAF7FB36EEDB794 /* WebRTC */; };
+		DA5E96BF599013B2D1B8F4E8 /* HermesMacSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 0CCEEDE69065A76C92D5F1E8 /* HermesMacSupport */; };
 		DB6E02E7451788797E0723A6 /* BotRoster.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7C3D8889E2F335D5966AF1 /* BotRoster.swift */; };
 		DC0B1F8A94EEAD121D450574 /* HermesMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 330FBC1003F4899C51BE0895 /* HermesMark.swift */; };
 		DD1A55FBE6CCB5FEA721E7C4 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3147A0598D3E1B2EFE059C6B /* Components.swift */; };
@@ -427,6 +436,7 @@
 		17223865007E78A50C512209 /* LearnedSkillPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearnedSkillPage.swift; sourceTree = "<group>"; };
 		177942A1E815274590668D2B /* Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatting.swift; sourceTree = "<group>"; };
 		194CF757A863916B13EA8DC4 /* BotChatViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotChatViews.swift; sourceTree = "<group>"; };
+		1A746A39FF36F7A828F6272B /* hermes-ring.caf */ = {isa = PBXFileReference; path = "hermes-ring.caf"; sourceTree = "<group>"; };
 		1B1E4D3BD50D20E271564D85 /* BotSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotSheet.swift; sourceTree = "<group>"; };
 		1B4F3531DAC5AE58784937A6 /* InspectorTabWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorTabWindow.swift; sourceTree = "<group>"; };
 		1C3EC43231CE0C77CA20F7BE /* SpokenMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpokenMessages.swift; sourceTree = "<group>"; };
@@ -464,8 +474,10 @@
 		34C884FE6D52DB3AA7608E2F /* PluginProfilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginProfilesView.swift; sourceTree = "<group>"; };
 		35D215F7FDAE63FE0C08BF3E /* ServerViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerViews.swift; sourceTree = "<group>"; };
 		3646EE3FA2716B5C0E604769 /* DeviceCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCamera.swift; sourceTree = "<group>"; };
+		36D235010F9C7E0916A0E600 /* NeoCallAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoCallAudio.swift; sourceTree = "<group>"; };
 		36DE8E578C725BE6DE2BF3DE /* AppPluginReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPluginReviewView.swift; sourceTree = "<group>"; };
 		372077C3F7916FBB006563EB /* WidgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetView.swift; sourceTree = "<group>"; };
+		37A3FB30E9A386B90F82710F /* BoxPairingScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoxPairingScanner.swift; sourceTree = "<group>"; };
 		37B91EC7B4089F5244378F93 /* CollectionsWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectionsWidgets.swift; sourceTree = "<group>"; };
 		38D1BC7835D441B9122BE0CF /* SpeechInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechInput.swift; sourceTree = "<group>"; };
 		38ECE52D5A1D7C9C53DB24BC /* WidgetSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSettings.swift; sourceTree = "<group>"; };
@@ -495,8 +507,10 @@
 		4C0236D483FE387F98D69F83 /* QuoteMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuoteMemory.swift; sourceTree = "<group>"; };
 		4CBFB5247AC1A974A5ADD87C /* ConversationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationModel.swift; sourceTree = "<group>"; };
 		4CCDE0CA82E44A8D8A1F88AB /* PluginsHubViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginsHubViews.swift; sourceTree = "<group>"; };
+		4D5EE8E1FD55C341E67D585A /* NeoBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoBox.swift; sourceTree = "<group>"; };
 		4E7CD891FDBE3C7248CBECFA /* PluginComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginComponents.swift; sourceTree = "<group>"; };
 		50BD332B5E6974D145FD6A19 /* VoiceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceUITests.swift; sourceTree = "<group>"; };
+		5144DCD1B7C8D30FEC44272D /* NeoCallsSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoCallsSettings.swift; sourceTree = "<group>"; };
 		52DB9C9178484F460FCC7459 /* ListenViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListenViews.swift; sourceTree = "<group>"; };
 		53191845B72BC623978DE9BC /* WidgetParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetParts.swift; sourceTree = "<group>"; };
 		544BA2966BE8A104F675577A /* ToolbarButtonsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarButtonsUITests.swift; sourceTree = "<group>"; };
@@ -523,6 +537,7 @@
 		641683BC38CC6ED1D64A4640 /* PushCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushCenter.swift; sourceTree = "<group>"; };
 		6503D50FE251017B2F3A4A76 /* PairingScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingScanner.swift; sourceTree = "<group>"; };
 		65B9564D89AC2C89465B2578 /* InspectorPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorPresentation.swift; sourceTree = "<group>"; };
+		669AEBCFF7AF2D84DA942996 /* NeoCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoCallView.swift; sourceTree = "<group>"; };
 		66E1BF571A6BF9AFEE131A53 /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		688513237C13FDE87E5FF515 /* PushSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushSheets.swift; sourceTree = "<group>"; };
 		69CB6124782192E27CA0BD71 /* TalkCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkCenter.swift; sourceTree = "<group>"; };
@@ -601,6 +616,7 @@
 		A10CCD80E543E6E1E4F17479 /* NowPlayingPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingPublisher.swift; sourceTree = "<group>"; };
 		A1C976FDFA49A2BC736F66D3 /* PluginOfferCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginOfferCard.swift; sourceTree = "<group>"; };
 		A20B62887DA33B2D81F9CE7A /* SetupCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupCenter.swift; sourceTree = "<group>"; };
+		A271054342E54B7FD509C99D /* NeoPushKitHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoPushKitHost.swift; sourceTree = "<group>"; };
 		A3E5DF5B94D19CAC9ABC78C1 /* HelperViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperViews.swift; sourceTree = "<group>"; };
 		A526CB3D525BDF1E197EEFBC /* AnswerFromActivityIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerFromActivityIntent.swift; sourceTree = "<group>"; };
 		A561B3A740221D8E69A1230F /* InboxListParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxListParts.swift; sourceTree = "<group>"; };
@@ -612,6 +628,7 @@
 		AA37B05C9FBD7C0BDC8CE5EB /* ReplyBody.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplyBody.swift; sourceTree = "<group>"; };
 		AB3193E2885FA09B362EE20E /* GroupChatUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupChatUITests.swift; sourceTree = "<group>"; };
 		ACCA4781D9F09B89A5B9928C /* WidgetSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSigner.swift; sourceTree = "<group>"; };
+		ADFC702E1F625F6E9F066736 /* NeoCallKitHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoCallKitHost.swift; sourceTree = "<group>"; };
 		AE9826FCF3D6E495D0E05B71 /* RealtimeLoopback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeLoopback.swift; sourceTree = "<group>"; };
 		AF20C6204B0EFEB101AF72A8 /* BoardCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardCopy.swift; sourceTree = "<group>"; };
 		B0D882C904BE141DEB048F86 /* SpokenPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpokenPlayer.swift; sourceTree = "<group>"; };
@@ -676,6 +693,7 @@
 		D8DCE68A5C048D3E37F570BD /* RouteWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteWatcher.swift; sourceTree = "<group>"; };
 		D9D2D5DCEF43257F63678086 /* ChangesModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangesModel.swift; sourceTree = "<group>"; };
 		DB15EAEFAB7E7C3B22F6B3FF /* ReadRecheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadRecheck.swift; sourceTree = "<group>"; };
+		DB4B1F440764DE5F3E27E8EF /* HermesBox */ = {isa = PBXFileReference; lastKnownFileType = folder; name = HermesBox; path = Packages/HermesBox; sourceTree = SOURCE_ROOT; };
 		DBBC6486B55526761B70853C /* FolderPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPickerSheet.swift; sourceTree = "<group>"; };
 		DDCAA78C61AB4467E72E5E0F /* Motion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Motion.swift; sourceTree = "<group>"; };
 		DE480A0097C12F38535C11E8 /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
@@ -736,8 +754,9 @@
 				0F7259542373A616BF878048 /* HermesKit in Frameworks */,
 				106F5BC24FB5A649060FFC8B /* HermesPush in Frameworks */,
 				311AB6F4A50E56160025D86F /* HermesMarkdown in Frameworks */,
-				0255BA676231B67BE5885A2B /* HermesMacSupport in Frameworks */,
-				DA5E96BF599013B2D1B8F4E8 /* WebRTC in Frameworks */,
+				0255BA676231B67BE5885A2B /* HermesBox in Frameworks */,
+				DA5E96BF599013B2D1B8F4E8 /* HermesMacSupport in Frameworks */,
+				697CA4D1ED8881D3EAC5679B /* WebRTC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -883,6 +902,7 @@
 		0F38929B47A03D55CCA7F0EF /* Packages */ = {
 			isa = PBXGroup;
 			children = (
+				DB4B1F440764DE5F3E27E8EF /* HermesBox */,
 				5AE14883E5C4F76A1654A74F /* HermesKit */,
 				EA5F91A046860A0117EA19BB /* HermesMacSupport */,
 			);
@@ -956,6 +976,21 @@
 				F2C514DC77B1962F72DF7CEC /* RootView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		205B7114480C92FA919375C9 /* Calls */ = {
+			isa = PBXGroup;
+			children = (
+				37A3FB30E9A386B90F82710F /* BoxPairingScanner.swift */,
+				1A746A39FF36F7A828F6272B /* hermes-ring.caf */,
+				4D5EE8E1FD55C341E67D585A /* NeoBox.swift */,
+				36D235010F9C7E0916A0E600 /* NeoCallAudio.swift */,
+				ADFC702E1F625F6E9F066736 /* NeoCallKitHost.swift */,
+				5144DCD1B7C8D30FEC44272D /* NeoCallsSettings.swift */,
+				669AEBCFF7AF2D84DA942996 /* NeoCallView.swift */,
+				A271054342E54B7FD509C99D /* NeoPushKitHost.swift */,
+			);
+			path = Calls;
 			sourceTree = "<group>";
 		};
 		21FD45477084A7467A8E6FDF /* Web */ = {
@@ -1234,6 +1269,7 @@
 			isa = PBXGroup;
 			children = (
 				3BEFA24A1217A768CCDA1CEA /* Audio */,
+				205B7114480C92FA919375C9 /* Calls */,
 				3D7A8822E2EBF3356679B8C3 /* Debug */,
 				8340BC738E410B312899E697 /* Design */,
 				025B1A824EA51C4C441DA035 /* Model */,
@@ -1586,6 +1622,7 @@
 				16DFB2492EE20A5F0CC61E10 /* HermesKit */,
 				2F4ED1CC7C0438AA2C6FEDFE /* HermesPush */,
 				527C6D441C3EA0A14E2C4CC6 /* HermesMarkdown */,
+				39A4FEF6EAB702FC4446EDED /* HermesBox */,
 				0CCEEDE69065A76C92D5F1E8 /* HermesMacSupport */,
 				0EF800A31CAF7FB36EEDB794 /* WebRTC */,
 			);
@@ -1676,6 +1713,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				EAEF521EC10D2A0E62AFA8DB /* XCRemoteSwiftPackageReference "WebRTC" */,
+				932AE30868DFCD5CB1059DB2 /* XCLocalSwiftPackageReference "Packages/HermesBox" */,
 				FA4FA4FCC93624BD978C680B /* XCLocalSwiftPackageReference "Packages/HermesKit" */,
 				FB94269640B842BE7E427E88 /* XCLocalSwiftPackageReference "Packages/HermesMacSupport" */,
 			);
@@ -1716,6 +1754,7 @@
 			files = (
 				B82D72EF221AE808B7799F94 /* Assets.xcassets in Resources */,
 				C90446A84E23BDD98045DA0A /* PrivacyInfo.xcprivacy in Resources */,
+				2CA9F9268DF64E6F677B149D /* hermes-ring.caf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1815,6 +1854,7 @@
 				3241BB9CEA1800598102453E /* BotSheet.swift in Sources */,
 				74CDA717AB7C7A2AC6D85AE3 /* BotVoiceModel.swift in Sources */,
 				4442F21174CB4D99B2CC5110 /* BotWorkspace.swift in Sources */,
+				D2B84962BC7209B8CC693F7E /* BoxPairingScanner.swift in Sources */,
 				158E00B866A6D4199CEA9352 /* BrowserController.swift in Sources */,
 				6CE2677C8EF16FD873C73F5F /* BrowserControllerScript.swift in Sources */,
 				C84F87DF3A8EAD200B448431 /* BrowserSettingsModel.swift in Sources */,
@@ -1932,6 +1972,12 @@
 				EF81CF40C102D2FAA2D51ECB /* MemoryView.swift in Sources */,
 				A37442CB11F0646DFDE70BE0 /* ModelPicker.swift in Sources */,
 				2781B9569789A85414C563C4 /* Motion.swift in Sources */,
+				2EB2AC65EC457CF307259F83 /* NeoBox.swift in Sources */,
+				205B77E2FC04A2DE9364BFD7 /* NeoCallAudio.swift in Sources */,
+				6AB666810F7ADC6DBFFD25A7 /* NeoCallKitHost.swift in Sources */,
+				279941BF0D0F443A97D97D43 /* NeoCallView.swift in Sources */,
+				2CA5AAD0DE2D18037F177F17 /* NeoCallsSettings.swift in Sources */,
+				2F02E2840ECDD7E2426774DA /* NeoPushKitHost.swift in Sources */,
 				A15456F7B17E325EFB6FA50C /* NotificationSettingsView.swift in Sources */,
 				3A4709097976927BCDCCB27E /* NowPlayingPublisher.swift in Sources */,
 				FBACED70EE23785F2AE76DEF /* NumbersWidgets.swift in Sources */,
@@ -2238,11 +2284,11 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				HERMES_APP_BUNDLE_ID = dev.supersaiyan.hermes;
-				HERMES_APP_GROUP = group.dev.supersaiyan.hermes;
+				HERMES_APP_BUNDLE_ID = dev.supersaiyan.hermesneo;
+				HERMES_APP_GROUP = group.dev.supersaiyan.hermesneo;
 				"HERMES_APP_GROUP[sdk=macosx*]" = "";
 				HERMES_APS_ENVIRONMENT = production;
-				HERMES_KEYCHAIN_GROUP = dev.supersaiyan.hermes.push;
+				HERMES_KEYCHAIN_GROUP = dev.supersaiyan.hermesneo.push;
 				HERMES_KEYCHAIN_PREFIX = GM3SRSD642.;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
@@ -2305,7 +2351,7 @@
 				HERMES_SPARKLE_PUBLIC_KEY = "";
 				HERMES_URL_SCHEME = "hermesapp-dev";
 				INFOPLIST_FILE = App/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Hermes Dev";
+				INFOPLIST_KEY_CFBundleDisplayName = "Hermes Neo";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Take photos to share with Hermes and scan pairing codes to connect.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Confirm it’s you before approving a payment or anything that can’t be undone.";
@@ -2406,7 +2452,7 @@
 				HERMES_SPARKLE_PUBLIC_KEY = "IUPLRKpg3gIVLpvG7a59SUTYCB6j707Jwmk9oYNlP4c=";
 				HERMES_URL_SCHEME = hermesapp;
 				INFOPLIST_FILE = App/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Hermes;
+				INFOPLIST_KEY_CFBundleDisplayName = "Hermes Neo";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Take photos to share with Hermes and scan pairing codes to connect.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Confirm it’s you before approving a payment or anything that can’t be undone.";
@@ -2522,11 +2568,11 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				HERMES_APP_BUNDLE_ID = dev.supersaiyan.hermes.dev;
-				HERMES_APP_GROUP = group.dev.supersaiyan.hermes.dev;
+				HERMES_APP_BUNDLE_ID = dev.supersaiyan.hermesneo;
+				HERMES_APP_GROUP = group.dev.supersaiyan.hermesneo;
 				"HERMES_APP_GROUP[sdk=macosx*]" = "";
 				HERMES_APS_ENVIRONMENT = development;
-				HERMES_KEYCHAIN_GROUP = dev.supersaiyan.hermes.dev.push;
+				HERMES_KEYCHAIN_GROUP = dev.supersaiyan.hermesneo.push;
 				HERMES_KEYCHAIN_PREFIX = GM3SRSD642.;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
@@ -2627,6 +2673,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		932AE30868DFCD5CB1059DB2 /* XCLocalSwiftPackageReference "Packages/HermesBox" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/HermesBox;
+		};
 		FA4FA4FCC93624BD978C680B /* XCLocalSwiftPackageReference "Packages/HermesKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/HermesKit;
@@ -2665,6 +2715,10 @@
 		2F4ED1CC7C0438AA2C6FEDFE /* HermesPush */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HermesPush;
+		};
+		39A4FEF6EAB702FC4446EDED /* HermesBox */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HermesBox;
 		};
 		5100437768E2C0FC4BBEAA6A /* HermesPush */ = {
 			isa = XCSwiftPackageProductDependency;
