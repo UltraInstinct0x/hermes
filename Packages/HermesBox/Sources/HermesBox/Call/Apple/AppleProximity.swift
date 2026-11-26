@@ -19,8 +19,8 @@ public final class AppleProximity: CallProximitySensing {
         guard device.isProximityMonitoringEnabled else { return }
         observer = NotificationCenter.default.addObserver(forName: UIDevice.proximityStateDidChangeNotification, object: device, queue: .main) {
             [weak self] _ in
-            let near = UIDevice.current.proximityState
-            Task { @MainActor in self?.onChange?(near) }
+            // Delivered on the main queue (`queue: .main`).
+            MainActor.assumeIsolated { self?.onChange?(UIDevice.current.proximityState) }
         }
     }
 

@@ -56,6 +56,8 @@ final class NeoBox {
         let calls = CallController(
             makeLink: { links.makeCallLink(gatewayId: $0) }, audio: audio, audioSession: VoiceAudioSession(driver: audio),
             microphone: AppleCallMicrophone())
+        // At the ear the call uses the receiver and the screen goes dark; away from it the speaker choice returns.
+        calls.proximity = AppleProximity()
         self.calls = calls
         let callKit = NeoCallKitHost()
         self.callKit = callKit
