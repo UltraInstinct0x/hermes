@@ -3,43 +3,36 @@ import HermesBox
 import SwiftUI
 import WebKit
 
-/// What the bot put on the call screen (`CallDisplay`), in a pane of its own that scrolls apart from
-/// the transcript: every item, newest first, as a card (a note, a picture) or the page itself (a
-/// link, drawn inline). Ported from Hermes Bot's `CallDisplayArea` (which paged one item at a time);
-/// the words and the https-only rule come from `CallDisplayPresentation`.
-struct NeoBotPane: View {
+/// What the bot put on the call screen, the second page of the call's pager: one item per page, newest first. A link
+/// is the page itself, drawn inline and full height (`NeoEmbeddedLink`); notes and pictures are cards that scroll
+/// inside. The pages are stepped with two 44 pt arrows (the area is inside the call's own swipe pager, so it does not
+/// swipe). Hermes Bot's `CallDisplayArea`, as it was; the words and the https-only rule come from
+/// `CallDisplayPresentation`.
+struct NeoCallDisplayArea: View {
     let items: [CallDisplayItem]
     let onClear: () -> Void
+    @State private var index = 0
+
+    private var current: CallDisplayItem? { items.isEmpty ? nil : items[min(index, items.count - 1)] }
 
     var body: some View {
-        VStack(spacing: 6) {
-            HStack {
-                Label("On screen", systemImage: "rectangle.stack")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText)
-                if items.count > 1 {
-                    Text("\(items.count)").font(.footnote.monospacedDigit()).foregroundStyle(Theme.tertiaryText)
+        Group {
+            if let current {
+                VStack(spacing: 6) {
+                    page(current).id(current.id)
+                    controls
                 }
-                Spacer()
-                Button(CallDisplayPresentation.clearTitle, action: onClear)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(minWidth: 44, minHeight: 32)
-                    .accessibilityHint(CallDisplayPresentation.clearHint)
+            } else {
+                Text(CallContentPane.emptyScreenSentence)
+                    .font(.subheadline)
+                    .foregroundStyle(NeoCallTheme.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(items) { item in
-                        page(item).id(item.id)
-                    }
-                }
-            }
-            .scrollIndicators(.visible)
         }
-        .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Theme.hairline))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("What the bot shows")
+        // A newer item is the first page.
+        .onChange(of: items.first?.id) { _, _ in index = 0 }
+        .onChange(of: items.count) { _, count in index = min(index, max(count - 1, 0)) }
     }
 
     @ViewBuilder
@@ -47,16 +40,52 @@ struct NeoBotPane: View {
         switch item.kind {
         case .url:
             if let url = CallDisplayPresentation.secureURL(item) {
-                NeoEmbeddedLink(item: item, url: url).frame(height: 340)
+                NeoEmbeddedLink(item: item, url: url)
             } else {
-                Text(CallDisplayPresentation.linkUnavailable)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondaryText)
-                    .neoCard()
+                unavailable(CallDisplayPresentation.linkUnavailable)
             }
         case .markdown, .image:
-            NeoDisplayCard(item: item)
+            ScrollView { NeoDisplayCard(item: item) }
         }
+    }
+
+    private func unavailable(_ sentence: String) -> some View {
+        Text(sentence)
+            .font(.subheadline)
+            .foregroundStyle(NeoCallTheme.secondaryText)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(NeoCallTheme.botBubble, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var controls: some View {
+        HStack(spacing: 0) {
+            if items.count > 1 {
+                step("chevron.left", label: "Newer item", enabled: index > 0) { index -= 1 }
+                Text(CallDisplayPresentation.pageLabel(index: index, count: items.count))
+                    .font(.footnote)
+                    .foregroundStyle(NeoCallTheme.secondaryText)
+                    .padding(.horizontal, 6)
+                step("chevron.right", label: "Older item", enabled: index < items.count - 1) { index += 1 }
+            }
+            Spacer()
+            Button(CallDisplayPresentation.clearTitle, action: onClear)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(NeoCallTheme.userBubble)
+                .frame(minWidth: NeoCallTheme.tapTarget, minHeight: NeoCallTheme.tapTarget)
+                .accessibilityHint(CallDisplayPresentation.clearHint)
+        }
+    }
+
+    private func step(_ symbol: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(enabled ? NeoCallTheme.primaryText : NeoCallTheme.secondaryText.opacity(0.4))
+                .frame(width: NeoCallTheme.tapTarget, height: NeoCallTheme.tapTarget)
+                .contentShape(Rectangle())
+        }
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 }
 
@@ -67,22 +96,24 @@ private struct NeoDisplayCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: CallDisplayPresentation.symbol(item.kind)).foregroundStyle(Theme.secondaryText).accessibilityHidden(true)
+                Image(systemName: CallDisplayPresentation.symbol(item.kind)).foregroundStyle(NeoCallTheme.secondaryText).accessibilityHidden(true)
                 Text(CallDisplayPresentation.title(item))
                     .font(.headline)
-                    .foregroundStyle(Theme.primaryText)
+                    .foregroundStyle(NeoCallTheme.primaryText)
                     .lineLimit(2)
                     .accessibilityAddTraits(.isHeader)
             }
             if item.kind == .markdown { note } else { picture }
         }
-        .neoCard()
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(NeoCallTheme.botBubble, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var note: some View {
         Text(CallDisplayPresentation.attributed(markdown: item.body ?? ""))
             .font(.body)
-            .foregroundStyle(Theme.primaryText)
+            .foregroundStyle(NeoCallTheme.primaryText)
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
     }
@@ -93,9 +124,9 @@ private struct NeoDisplayCard: View {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
-                    image.resizable().scaledToFit().frame(maxWidth: .infinity).clipShape(RoundedRectangle(cornerRadius: 10))
+                    image.resizable().scaledToFit().frame(maxWidth: .infinity)
                 case .failure:
-                    Text(CallDisplayPresentation.imageUnavailable).font(.subheadline).foregroundStyle(Theme.secondaryText)
+                    Text(CallDisplayPresentation.imageUnavailable).font(.subheadline).foregroundStyle(NeoCallTheme.secondaryText)
                 default:
                     ProgressView().frame(maxWidth: .infinity, minHeight: 80)
                 }
@@ -103,7 +134,7 @@ private struct NeoDisplayCard: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(CallDisplayPresentation.accessibilityLabel(item))
         } else {
-            Text(CallDisplayPresentation.imageUnavailable).font(.subheadline).foregroundStyle(Theme.secondaryText)
+            Text(CallDisplayPresentation.imageUnavailable).font(.subheadline).foregroundStyle(NeoCallTheme.secondaryText)
         }
     }
 }
@@ -229,7 +260,7 @@ struct NeoEmbeddedLink: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.controlFill)
+        .background(NeoCallTheme.botBubble)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(alignment: .topTrailing) { safariButton }
         .accessibilityElement(children: .contain)
@@ -253,8 +284,8 @@ struct NeoEmbeddedLink: View {
         } label: {
             Image(systemName: "safari")
                 .font(.body.weight(.semibold))
-                .foregroundStyle(Theme.primaryText)
-                .frame(width: 44, height: 44)
+                .foregroundStyle(NeoCallTheme.primaryText)
+                .frame(width: NeoCallTheme.tapTarget, height: NeoCallTheme.tapTarget)
                 .background(.regularMaterial, in: Circle())
         }
         .padding(6)
@@ -263,14 +294,16 @@ struct NeoEmbeddedLink: View {
 
     private func failure(_ details: String) -> some View {
         VStack(spacing: 8) {
-            Text("This page could not be shown.").font(.subheadline).foregroundStyle(Theme.primaryText)
+            Text("This page could not be shown.").font(.subheadline).foregroundStyle(NeoCallTheme.primaryText)
             HStack {
                 Button("Retry") { attempt += 1 }
                 Button("Copy details") { UIPasteboard.general.string = details }
             }
             .buttonStyle(.bordered)
+            .frame(minHeight: NeoCallTheme.tapTarget)
         }
         .padding(16)
+        .background(NeoCallTheme.botBubble)
     }
 }
 #endif

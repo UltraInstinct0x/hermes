@@ -198,6 +198,18 @@ final class NeoBox {
         Task { [voip] in await voip.start() }
     }
 
+    /// The calling bot's chat in the app, when a gateway's Bot Mode lists a bot of that profile: its waiting approval
+    /// or question shows on the call screen. Nil when the app has no such bot (then nothing shows there).
+    func waitingConversation(botKey: String?) -> ConversationModel? {
+        guard let botKey, let app else { return nil }
+        let profile = BotKey(rawValue: botKey).profileId
+        for workspace in [app.currentWorkspace].compactMap({ $0 }) + app.bots.compactMap({ app.workspaces[$0.id] }) {
+            guard let roster = workspace.roster, roster.profiles.contains(where: { $0.name == profile }) else { continue }
+            return roster.conversation(for: profile)
+        }
+        return nil
+    }
+
     // MARK: calls from your bots
 
     /// The switch. Turning it on asks for the microphone now (a ring can't ask from a locked phone),

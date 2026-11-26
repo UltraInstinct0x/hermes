@@ -3,359 +3,289 @@ import AVKit
 import HermesBox
 import SwiftUI
 
-/// What the call screen draws, read from `CallController` (or a fake, in Debug, for screenshots).
-/// The views hold no logic: every word comes from `CallPresentation` and the HermesBox models.
-struct NeoCallScreenState {
-    enum Stage {
-        /// Before the call is up, or asking for the microphone.
-        case starting(String?)
-        case running
-        case ended(CallEndedSummary)
-        case failed(CallFailure)
-    }
-
-    var stage: Stage
-    var botName: String
-    var botKey: String?
-    var startedAt: Date?
-    var orb: CallOrbState
-    var stateLine: String
-    var lines: [CallTranscriptLine]
-    var display: [CallDisplayItem]
-    var isMuted: Bool
-    var isInCall: Bool
-    var routeFilled: Bool
-    var routeValue: String
-    var holdSentence: String?
-    var notice: String?
-    /// Another device has the call: the sentence, and whether it can be taken over here.
-    var elsewhere: (sentence: String, canTakeOver: Bool, liveNote: String?)?
-
-    init(calls: CallController) {
-        let name = calls.bot?.name ?? ""
-        botName = name.isEmpty ? "Your bot" : name
-        botKey = calls.bot?.botKey
-        startedAt = calls.callStartedAt
-        orb = CallOrbState(
-            phase: calls.phase, session: calls.session, muted: calls.isMuted, hold: calls.hold, userSpeaking: calls.userSpeaking,
-            playing: calls.isPlaying, thinkingGaveUp: calls.thinkingGaveUp)
-        stateLine = calls.stateLine
-        lines = calls.session.map { CallTranscriptLine.lines($0.captions, botName: name) } ?? []
-        display = calls.displayItems
-        isMuted = calls.isMuted
-        isInCall = calls.isInCall
-        routeFilled = calls.outputState.routeIsFilled
-        routeValue = CallOutputPresentation.routeValue(calls.outputState)
-        holdSentence = calls.hold.map(CallPresentation.holdSentence)
-        notice = calls.session?.notice
-        if let session = calls.session, session.isListenerOnly {
-            elsewhere = (
-                session.isElsewhere ? CallPresentation.elsewhereSentence(ownerName: session.ownerName) : CallPresentation.ownerlessSentence,
-                session.canTakeOver, session.engine == .live ? CallPresentation.liveTakeoverSentence : nil)
-        }
-        switch calls.phase {
-        case .idle: stage = .starting(calls.isAskingMicrophone ? CallPresentation.microphoneExplanation : nil)
-        case .running: stage = calls.session == nil ? .starting(nil) : .running
-        case .over(let ending):
-            stage = .ended(calls.endedSummary ?? CallEndedSummary(kind: .other, botName: name, detail: ending.sentence))
-        case .failed(let failure): stage = calls.endedSummary.map(Stage.ended) ?? .failed(failure)
-        }
-    }
-
-    #if DEBUG
-    init(
-        stage: Stage, botName: String, botKey: String?, startedAt: Date?, orb: CallOrbState, stateLine: String,
-        lines: [CallTranscriptLine], display: [CallDisplayItem], isMuted: Bool = false
-    ) {
-        self.stage = stage
-        self.botName = botName
-        self.botKey = botKey
-        self.startedAt = startedAt
-        self.orb = orb
-        self.stateLine = stateLine
-        self.lines = lines
-        self.display = display
-        self.isMuted = isMuted
-        if case .running = stage { isInCall = true } else { isInCall = false }
-        routeFilled = false
-        routeValue = "iPhone"
-    }
-    #endif
-}
-
-/// Everything the person can do on the call screen, each one call into `CallController`.
-struct NeoCallScreenActions {
-    var minimize: () -> Void = {}
-    var toggleMute: () -> Void = {}
-    var end: () -> Void = {}
-    var resume: () -> Void = {}
-    var takeOver: () -> Void = {}
-    var leave: () -> Void = {}
-    var clearDisplay: () -> Void = {}
-    var callAgain: () -> Void = {}
-    var retry: () -> Void = {}
-    var done: () -> Void = {}
-
-    init() {}
-
-    init(calls: CallController) {
-        minimize = { calls.closeScreen() }
-        toggleMute = { calls.toggleMute() }
-        end = { calls.end() }
-        resume = { calls.resume() }
-        takeOver = { calls.takeOver() }
-        leave = { calls.leave() }
-        clearDisplay = { calls.clearDisplay() }
-        callAgain = { Task { await calls.callAgain() } }
-        retry = { Task { await calls.retry() } }
-        done = { calls.clear() }
-    }
-}
-
-/// The live levels the avatar follows (30 times a second), read in the avatar's own view so only it
-/// redraws. `CallController` is the real one.
-@MainActor
-protocol NeoCallLevels: AnyObject {
-    var micLevel: Double { get }
-    var playbackLevel: Double { get }
-}
-
-extension CallController: NeoCallLevels {}
-
-/// The call screen, built on Hermes Bot's (`CallViews.swift`): the bot's indicator at the top in the
-/// old orb's place and size (now its animated avatar), the conversation in large captions (Talk's
-/// style, `TalkTexts`), what the bot shows in its own scrollable pane, and Mute, the route picker and
-/// End. The chevron minimises the call to the call bar (`NeoCallBar`) while it keeps running.
+/// The call: the bot's indicator, transcript or screen, mute, route, End. Hermes Bot's `CallScreen`
+/// (`ios/HermesBot/CallViews.swift`), ported as it was: the same layout, sizes, fonts and colours (`NeoCallTheme`).
+/// Neo's changes: the indicator is the bot's own avatar (`NeoCallOrbHost`), the transcript page uses upstream Talk's
+/// transcript flow in a larger size (`NeoCallTranscript`), a Chats button in the bottom row minimises the call to the
+/// app (the call bar), and a request the calling bot waits on is answered here with upstream's own card.
+/// Views hold no logic: every action is one call into `CallController`, every sentence comes from `CallPresentation`.
 struct NeoCallScreen: View {
-    let state: NeoCallScreenState
-    let actions: NeoCallScreenActions
-    let levels: any NeoCallLevels
+    let calls: CallController
+    /// The calling bot's chat, when the app has it: its waiting approval or question shows on the call screen.
+    var waiting: ConversationModel?
 
+    @State private var pane: CallContentPane = .transcript
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The shared ending, once the call is over (any cause) and its summary is built.
+    private var endedSummary: CallEndedSummary? {
+        switch calls.phase {
+        case .over, .failed: calls.endedSummary
+        case .idle, .running: nil
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            switch state.stage {
-            case .ended(let summary):
-                NeoCallEndedView(summary: summary, botKey: state.botKey, onCallAgain: actions.callAgain, onDone: actions.done)
+            if let summary = endedSummary {
+                NeoCallEndedView(
+                    summary: summary,
+                    botKey: calls.bot?.botKey,
+                    onCallAgain: { Task { await calls.callAgain() } },
+                    onDone: { calls.clear() })
                     .transition(.opacity)
-            case .failed(let failure):
-                indicator
-                failed(failure)
-            case .starting(let explanation):
-                indicator
-                starting(explanation)
-            case .running:
-                indicator
-                running
+            } else {
+                NeoCallOrbHost(calls: calls).padding(.vertical, 4)
+                if calls.phase == .running, calls.session != nil {
+                    running
+                } else {
+                    ScrollView {
+                        content.padding(.horizontal, 16).padding(.vertical, 12)
+                    }
+                }
             }
             controls
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: isEnded)
-        .background(Theme.canvas)
-        .interactiveDismissDisabled(!state.isInCall)
-    }
-
-    private var isEnded: Bool {
-        if case .ended = state.stage { true } else { false }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: endedSummary != nil)
+        .background(NeoCallTheme.background)
+        .interactiveDismissDisabled(!calls.isInCall)
     }
 
     // MARK: pieces
 
     private var topBar: some View {
         HStack {
-            Button(action: state.isInCall ? actions.minimize : actions.done) {
-                Image(systemName: "chevron.down")
-                    .font(.body.weight(.semibold))
-                    .frame(width: 44, height: 44)
+            Button {
+                calls.closeScreen()
+            } label: {
+                Image(systemName: "chevron.down").frame(width: NeoCallTheme.tapTarget, height: NeoCallTheme.tapTarget)
             }
-            .accessibilityLabel(state.isInCall ? "Minimize the call" : "Close")
-            .accessibilityHint(state.isInCall ? "The call keeps going. Return to it from the call bar" : "Closes the call screen")
+            .accessibilityLabel("Hide the call")
+            .accessibilityHint(calls.isInCall ? "The call keeps going" : "Closes the call screen")
             Spacer()
-            if let started = state.startedAt, state.isInCall {
-                Text(timerInterval: started...Date.distantFuture, countsDown: false)
-                    .font(.footnote.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(Theme.secondaryText)
-                    .padding(.horizontal, 12)
-                    .accessibilityLabel("Call length")
+            if endedSummary == nil {
+                enginePill
             }
         }
         .padding(.horizontal, 8)
-        .foregroundStyle(Theme.primaryText)
+        .foregroundStyle(NeoCallTheme.primaryText)
     }
 
-    /// The old orb's place and size (88 pt, under the top bar), then who and what, small.
-    private var indicator: some View {
-        VStack(spacing: 6) {
-            NeoCallAvatar(botKey: state.botKey, state: state.orb, levels: levels)
-            Text(state.botName)
-                .font(.headline)
-                .foregroundStyle(Theme.primaryText)
-                .lineLimit(1)
-            Text(state.stateLine)
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .contentTransition(.opacity)
-                .accessibilityAddTraits(.updatesFrequently)
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 16)
-        .accessibilityElement(children: .combine)
+    private var engineLabel: String {
+        calls.session.map { CallPresentation.engineName($0.engine) } ?? CallPresentation.engineName(.free)
     }
 
-    private var running: some View {
-        VStack(spacing: 10) {
-            if let elsewhere = state.elsewhere { elsewhereCard(elsewhere) }
-            if let hold = state.holdSentence { holdCard(hold) }
-            if let notice = state.notice {
-                Text(notice).font(.footnote).foregroundStyle(Theme.secondaryText)
+    private var enginePill: some View {
+        Text(engineLabel)
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 12)
+            .frame(minHeight: NeoCallTheme.tapTarget)
+            .accessibilityLabel("Engine \(engineLabel)")
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch calls.phase {
+        case .idle:
+            if calls.isAskingMicrophone {
+                Text(CallPresentation.microphoneExplanation).font(.subheadline).foregroundStyle(NeoCallTheme.secondaryText)
             }
-            // The transcript's own region, below the status line: older lines fade out at its top edge,
-            // inside the region, and nothing is drawn outside it.
-            NeoCallTranscript(lines: state.lines)
-                .frame(maxHeight: .infinity)
-                .mask {
-                    VStack(spacing: 0) {
-                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 28)
-                        Color.black
-                    }
+        case .failed(let failure):
+            NeoFailureRow(failure: failure.calm) { Task { await calls.retry() } }
+            if !failure.canRetry { doneButton }
+        case .over(let ending):
+            VStack(spacing: 12) {
+                Text(ending.sentence).font(.subheadline).foregroundStyle(NeoCallTheme.primaryText)
+                if !ending.isCalm {
+                    Button("Retry") { Task { await calls.retry() } }
+                        .buttonStyle(.borderedProminent)
+                        .frame(minHeight: NeoCallTheme.tapTarget)
                 }
-                .clipShape(Rectangle())
-                .padding(.top, 8)
-            if !state.display.isEmpty {
-                NeoBotPane(items: state.display, onClear: actions.clearDisplay)
-                    .containerRelativeFrame(.vertical) { height, _ in height * 0.34 }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                doneButton
             }
+            .frame(maxWidth: .infinity)
+        case .running:
+            EmptyView()
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: state.display.isEmpty)
     }
 
-    private func starting(_ explanation: String?) -> some View {
-        VStack {
-            if let explanation {
-                Text(explanation).font(.subheadline).foregroundStyle(Theme.secondaryText).multilineTextAlignment(.center)
+    private var doneButton: some View {
+        Button("Done") { calls.clear() }
+            .buttonStyle(.bordered)
+            .frame(minHeight: NeoCallTheme.tapTarget)
+    }
+
+    @ViewBuilder
+    private var running: some View {
+        if let session = calls.session {
+            VStack(spacing: 10) {
+                // A listener is never silently mute: the takeover is the first thing on the screen, large.
+                if session.isListenerOnly { elsewhere(session) }
+                if let hold = calls.hold { holdCard(hold) }
+                waitingCard
+                if let notice = session.notice { Text(notice).font(.footnote).foregroundStyle(NeoCallTheme.secondaryText) }
+                paneContent(session)
+                paneDots
             }
-            Spacer()
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            .onChange(of: calls.displayItems.count) { old, new in
+                withAnimation(.smooth(duration: 0.35)) {
+                    pane = CallContentPane.following(current: pane, oldCount: old, newCount: new)
+                }
+            }
         }
-        .padding(16)
+    }
+
+    /// Two panes side by side, swiped like pages. The slide is the pager's own.
+    private func paneContent(_ session: CallSession) -> some View {
+        TabView(selection: $pane) {
+            NeoCallTranscript(lines: CallTranscriptLine.lines(session.captions, botName: calls.bot?.name ?? "Bot"))
+                .tag(CallContentPane.transcript)
+            NeoCallDisplayArea(items: calls.displayItems, onClear: { calls.clearDisplay() })
+                .tag(CallContentPane.screen)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func failed(_ failure: CallFailure) -> some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                Text(failure.sentence).font(.body).foregroundStyle(Theme.primaryText).multilineTextAlignment(.center)
-                HStack {
-                    if failure.canRetry { Button("Retry", action: actions.retry).buttonStyle(.borderedProminent) }
-                    Button("Done", action: actions.done).buttonStyle(.bordered)
-                }
-                if !failure.details.isEmpty {
-                    Button("Copy details") { UIPasteboard.general.string = failure.details }.font(.footnote)
-                }
+    /// A tiny two-dot page indicator, not a control for touch. VoiceOver adjusts it (swipe up or down) to change the pane.
+    private var paneDots: some View {
+        HStack(spacing: 8) {
+            ForEach(CallContentPane.allCases) { option in
+                Circle()
+                    .fill(pane == option ? NeoCallTheme.primaryText : NeoCallTheme.secondaryText.opacity(0.4))
+                    .frame(width: 6, height: 6)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity)
+        }
+        .frame(height: 12)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Page \(pane == .transcript ? 1 : 2) of 2, \(pane.rawValue)")
+        .accessibilityAdjustableAction { direction in
+            withAnimation(.smooth(duration: 0.35)) { pane = direction == .increment ? .screen : .transcript }
         }
     }
 
-    private func elsewhereCard(_ elsewhere: (sentence: String, canTakeOver: Bool, liveNote: String?)) -> some View {
+    private func elsewhere(_ session: CallSession) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(elsewhere.sentence).font(.headline).foregroundStyle(Theme.primaryText)
-            if elsewhere.canTakeOver {
-                Button(CallPresentation.takeOverTitle, action: actions.takeOver)
+            Text(session.isElsewhere ? CallPresentation.elsewhereSentence(ownerName: session.ownerName) : CallPresentation.ownerlessSentence)
+                .font(.headline)
+                .foregroundStyle(NeoCallTheme.primaryText)
+            if session.canTakeOver {
+                Button(CallPresentation.takeOverTitle) { calls.takeOver() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .frame(maxWidth: .infinity, minHeight: 56)
-            } else if let note = elsewhere.liveNote {
-                Text(note).font(.footnote).foregroundStyle(Theme.secondaryText)
+            } else if session.engine == .live {
+                Text(CallPresentation.liveTakeoverSentence).font(.footnote).foregroundStyle(NeoCallTheme.secondaryText)
             }
-            Button("Leave the call", action: actions.leave)
+            Button("Leave the call") { calls.leave() }
                 .buttonStyle(.bordered)
-                .frame(minHeight: 44)
+                .frame(minHeight: NeoCallTheme.tapTarget)
                 .accessibilityHint("You leave, the call goes on where it is")
         }
-        .neoCard()
+        .oldCard()
     }
 
-    private func holdCard(_ sentence: String) -> some View {
+    private func holdCard(_ hold: CallHold) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(sentence).font(.subheadline).foregroundStyle(Theme.primaryText)
-            Button("Resume", action: actions.resume)
+            Text(CallPresentation.holdSentence(hold)).font(.subheadline).foregroundStyle(NeoCallTheme.primaryText)
+            Button("Resume") { calls.resume() }
                 .buttonStyle(.borderedProminent)
-                .frame(minHeight: 44)
+                .frame(minHeight: NeoCallTheme.tapTarget)
         }
-        .neoCard()
+        .oldCard()
+    }
+
+    /// What the calling bot waits on, where Hermes Bot had its waiting banner: upstream's own approval card, answered
+    /// in place; for a question, upstream's waiting dock (its chips answer it, a tap on it minimises to the app).
+    @ViewBuilder
+    private var waitingCard: some View {
+        #if DEBUG
+        if NeoCallDemo.mode == "waiting" {
+            ApprovalCard(approval: NeoCallDemo.approval, asker: calls.bot?.name ?? "Your bot", onChoice: { _ in })
+        }
+        #endif
+        if let conversation = waiting {
+            if let approval = conversation.pendingApproval {
+                ApprovalCard(
+                    approval: approval, asker: calls.bot?.name ?? "Your bot", waiting: conversation.waitingApprovals,
+                    onChoice: { conversation.respond(to: approval, with: $0) }, onChoiceForAll: conversation.respondToAll)
+                    .id(approval.id)
+            } else if !conversation.waitingItems.isEmpty {
+                NeedsYouDock(conversation: conversation) { calls.closeScreen() }
+            }
+        }
     }
 
     // MARK: controls
 
     @ViewBuilder
     private var controls: some View {
-        if state.isInCall {
+        if calls.isInCall {
             HStack(spacing: 24) {
                 roundButton(
-                    title: CallPresentation.muteTitle(muted: state.isMuted), image: state.isMuted ? "mic.slash.fill" : "mic.fill",
-                    filled: state.isMuted, action: actions.toggleMute)
+                    title: CallPresentation.muteTitle(muted: calls.isMuted), image: calls.isMuted ? "mic.slash.fill" : "mic.fill",
+                    filled: calls.isMuted
+                ) { calls.toggleMute() }
                 routeButton
-                roundButton(title: "End call", image: "phone.down.fill", filled: true, tint: Theme.danger, action: actions.end)
+                // Neo: back to the app while the call goes on (the call bar brings it back).
+                roundButton(title: "Chats", image: "bubble.left.and.bubble.right.fill", filled: false) { calls.closeScreen() }
+                    .accessibilityLabel("Hide the call")
+                    .accessibilityHint("Goes back to your chats and bots. The call keeps going")
+                roundButton(title: "End call", image: "phone.down.fill", filled: true, tint: NeoCallTheme.problem) { calls.end() }
             }
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity)
-            .background(Theme.canvas)
+            .background(NeoCallTheme.background)
         }
     }
 
-    /// The system's list of sound devices: filled while the speaker or a connected device has the sound.
+    /// The system's list of sound devices: filled while the speaker or a connected device has the sound, read from the
+    /// route the session really has.
     private var routeButton: some View {
-        VStack(spacing: 4) {
-            ZStack {
-                Circle().fill(state.routeFilled ? Theme.ink : Theme.controlFill)
-                NeoRoutePicker(active: state.routeFilled)
-            }
-            .frame(width: 56, height: 56)
-            Text("Audio").font(.caption).foregroundStyle(Theme.secondaryText)
+        let filled = calls.outputState.routeIsFilled
+        return ZStack {
+            Circle().fill(filled ? NeoCallTheme.primaryText : NeoCallTheme.botBubble)
+            NeoRoutePicker(active: filled)
         }
+        .frame(width: 56, height: 56)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Audio route")
-        .accessibilityValue(state.routeValue)
+        .accessibilityValue(CallOutputPresentation.routeValue(calls.outputState))
         .accessibilityHint("Chooses the iPhone, the speaker, AirPlay, Bluetooth or headphones")
     }
 
     private func roundButton(
-        title: String, image: String, filled: Bool, tint: Color = Theme.ink, action: @escaping () -> Void
+        title: String, image: String, filled: Bool, tint: Color = NeoCallTheme.userBubble, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: image)
                     .font(.title3)
                     .frame(width: 56, height: 56)
-                    .background(filled ? tint : Theme.controlFill, in: Circle())
-                    .foregroundStyle(filled ? (tint == Theme.danger ? .white : Theme.inkForeground) : Theme.primaryText)
-                Text(title).font(.caption).foregroundStyle(Theme.secondaryText)
+                    .background(filled ? tint : NeoCallTheme.botBubble, in: Circle())
+                    .foregroundStyle(filled ? NeoCallTheme.onUserBubble : NeoCallTheme.primaryText)
+                Text(title).font(.caption).foregroundStyle(NeoCallTheme.secondaryText)
             }
-            .frame(minWidth: 44, minHeight: 44)
+            .frame(minWidth: NeoCallTheme.tapTarget, minHeight: NeoCallTheme.tapTarget)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
     }
 }
 
-extension View {
-    func neoCard() -> some View {
+private extension View {
+    func oldCard() -> some View {
         padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.controlFill, in: RoundedRectangle(cornerRadius: 14))
+            .background(NeoCallTheme.botBubble, in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
-/// The system's route picker (AirPlay, Bluetooth, headphones, speaker, phone). Its circle is drawn
-/// behind it, filled while a device other than the phone has the sound.
+/// The system's route picker (AirPlay, Bluetooth, headphones, speaker, phone). Its circle is drawn behind it, filled
+/// while a device other than the phone has the sound, so the glyph is dark on a light disc then.
 struct NeoRoutePicker: UIViewRepresentable {
     var active = false
 
@@ -366,6 +296,7 @@ struct NeoRoutePicker: UIViewRepresentable {
     }
 
     func updateUIView(_ view: AVRoutePickerView, context: Context) {
+        // The disc is `label` coloured (white on dark, black on light), so the glyph takes the background colour on it.
         view.tintColor = active ? .systemBackground : .label
         view.activeTintColor = active ? .systemBackground : .label
     }

@@ -133,7 +133,7 @@ struct CallControllerTests {
         #expect(rig.controller.diagnostics.echoCancellation == "off (fallback)")
         await rig.time.advance(by: .milliseconds(1600))
         guard case .failed(let failure) = rig.controller.phase else { Issue.record("not failed: \(rig.controller.phase)"); return }
-        #expect(failure.sentence == "The microphone is not delivering audio. Check Settings, Hermes Bot, Microphone, then retry.")
+        #expect(failure.sentence == "The microphone is not delivering audio. Check Settings, Hermes Neo, Microphone, then retry.")
         #expect(failure.details.contains("echo cancellation: off (fallback)") && failure.details.contains("session: category=playAndRecord"))
         #expect(failure.details.contains("watchdog: no audio even without echo cancellation"))
         #expect(rig.audio.startModes == [true, false], "no third start")

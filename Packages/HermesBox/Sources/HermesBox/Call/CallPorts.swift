@@ -173,11 +173,11 @@ public struct CallFailure: Sendable, Equatable {
     }
 
     static let microphoneDenied = CallFailure(
-        sentence: "Hermes Bot cannot use the microphone. Allow it in Settings, then try again.", details: "microphone permission denied",
+        sentence: "Hermes Neo cannot use the microphone. Allow it in Settings, then try again.", details: "microphone permission denied",
         canRetry: true)
 
     static let microphoneSilent = CallFailure(
-        sentence: "The microphone is not delivering audio. Check Settings, Hermes Bot, Microphone, then retry.",
+        sentence: "The microphone is not delivering audio. Check Settings, Hermes Neo, Microphone, then retry.",
         details: "no microphone buffers 1.5 s after the audio engine started, with and without echo cancellation", canRetry: true)
 
     static func audio(_ detail: String) -> CallFailure {
