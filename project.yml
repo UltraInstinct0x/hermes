@@ -53,6 +53,9 @@ packages:
   # Hermes Neo: the owner's box (pairing, calls from bots), ported from the Hermes Bot app.
   HermesBox:
     path: Packages/HermesBox
+  # Hermes Neo: the bots' animated avatar (bloub), vendored from Hermes Bot (Packages/HermesAvatar/VENDORED.md).
+  HermesAvatar:
+    path: Packages/HermesAvatar
   # Mac-only support (Sparkle), linked only into macOS builds.
   HermesMacSupport:
     path: Packages/HermesMacSupport
@@ -80,6 +83,9 @@ targets:
         product: HermesMarkdown
       - package: HermesBox
         product: HermesBox
+        destinationFilters: [iOS]
+      - package: HermesAvatar
+        product: HermesAvatarUI
         destinationFilters: [iOS]
       - target: HermesNotificationService
         destinationFilters: [iOS]
