@@ -48,6 +48,9 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
     private var playGeneration = 0
     private var level: Float = 1
     private var rampTask: Task<Void, Never>?
+    /// What the speaker renders now, read 30 times a second from the player's own timeline while
+    /// the Bot talks (read only: it changes nothing that plays). The avatar follows it.
+    private var playbackMeter: Task<Void, Never>?
     private var lastError: String?
 
     init(coordinator: AudioCoordinator = .shared) {
@@ -282,23 +285,35 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
             let target = buffer.floatChannelData?[0]
         else { return }
-        var sum = 0.0
-        for (index, sample) in samples.enumerated() {
-            let value = Float(sample) / 32768
-            target[index] = value
-            sum += Double(value) * Double(value)
-        }
+        for (index, sample) in samples.enumerated() { target[index] = Float(sample) / 32768 }
         buffer.frameLength = AVAudioFrameCount(samples.count)
-        let rms = (sum / Double(max(samples.count, 1))).squareRoot()
-        let decibels = rms <= 0.000_001 ? -120 : 20 * log10(rms)
         pending += 1
-        player.schedule(buffer, completion: Self.playbackCompletion(self, generation: playGeneration, decibels: decibels, report: onPlaybackLevel))
+        player.schedule(buffer, completion: Self.playbackCompletion(self, generation: playGeneration))
+        startPlaybackMeter()
         if !player.isPlaying {
             do { try player.play() } catch { fail("the call's player could not play: \(error)") }
         }
     }
 
+    /// The level of what plays at this moment (the chain measures every 1/30 s of its timeline as it
+    /// is scheduled and finds it again by play time), so the meter follows the voice, not the network.
+    private func startPlaybackMeter() {
+        guard playbackMeter == nil else { return }
+        playbackMeter = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.pending > 0, let player = self.player else { break }
+                let level = Double(player.currentLevel)
+                // AudioLevel maps -50...0 dB onto 0...1; silence is -120.
+                self.onPlaybackLevel?(level <= 0 ? -120 : level * 50 - 50)
+                try? await Task.sleep(for: .milliseconds(33))
+            }
+            self?.playbackMeter = nil
+        }
+    }
+
     func stopPlayback() {
+        playbackMeter?.cancel()
+        playbackMeter = nil
         playGeneration += 1
         pending = 0
         player?.stop()
@@ -350,13 +365,9 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
         { line in logger.info("\(line, privacy: .public)") }
     }
 
-    /// The player's completion runs on its own queue: hop to the main actor explicitly. The level
-    /// of what just played is reported then, so the meter follows the speaker, not the network.
-    nonisolated private static func playbackCompletion(
-        _ audio: NeoCallAudio, generation: Int, decibels: Double, report: (@Sendable (Double) -> Void)?
-    ) -> @Sendable () -> Void {
+    /// The player's completion runs on its own queue: hop to the main actor explicitly.
+    nonisolated private static func playbackCompletion(_ audio: NeoCallAudio, generation: Int) -> @Sendable () -> Void {
         { [weak audio] in
-            report?(decibels)
             Task { @MainActor in audio?.bufferPlayed(generation: generation) }
         }
     }

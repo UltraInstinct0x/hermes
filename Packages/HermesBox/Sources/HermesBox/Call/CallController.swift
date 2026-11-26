@@ -145,6 +145,9 @@ public final class CallController {
 
     public var isInCall: Bool { phase == .running }
 
+    /// Hermes Neo: when the running call started here, for the call bar's and the screen's clock (read only).
+    public var callStartedAt: Date? { isInCall ? startedAt : nil }
+
     /// The bot is in standby (it answers only to a wake word); the call itself is unchanged.
     public var standingBy: Bool { session?.standingBy ?? false }
 
