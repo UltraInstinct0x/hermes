@@ -54,6 +54,7 @@ final class BotRoster {
             guard state != oldValue else { return }
             ConnectionLog.logger.notice("bots: \(String(describing: self.state), privacy: .public)")
             if state.isOnline { resumeConnectedWaiters() }
+            workspace?.app?.invalidateLedger()
         }
     }
     /// Every Bot as `profiles.list` reports it.
@@ -1338,6 +1339,9 @@ final class BotRoster {
     }
 
     private func route(_ event: GatewayEvent) {
+        if event.type.hasPrefix("request.") || event.type == "approval.cancelled" {
+            workspace?.app?.invalidateLedger()
+        }
         // The gateway's change watcher: broadcast to every client, not tagged with a profile.
         if event.type == "projects.changed" {
             workspace?.projects.changeEvent(event.type)
@@ -1383,6 +1387,9 @@ final class BotRoster {
     }
 
     private func handle(_ request: GatewayServerRequest, on socket: GatewaySocket) async {
+        if ["approval", "clarify", "secret", "sudo"].contains(request.method) {
+            workspace?.app?.invalidateLedger()
+        }
         let target = allConversations.first { $0.runtimeSessionID == request.sessionID }
         guard let target else {
             // No chat here shows that session; let a window that does answer it.

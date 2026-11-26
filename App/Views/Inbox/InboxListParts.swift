@@ -1,5 +1,94 @@
 import HermesKit
+import HermesPush
 import SwiftUI
+
+struct NeedsYouRows: View {
+    let app: AppModel
+    let windowID: UUID?
+
+    @ViewBuilder var body: some View {
+        let feed = app.needsYou
+        if let snapshot = feed.snapshot {
+            if !snapshot.open.isEmpty {
+                SidebarSectionTitle(title: String(localized: "Needs You"))
+                ForEach(snapshot.open) { row in
+                    entry(row, detail: feed.receipts[row.id]) {
+                        if feed.canOpenLocally(row) {
+                            Button("Open Chat") { feed.openLocalChat(row, app: app, window: windowID) }
+                        }
+                        if feed.canDeny(row) {
+                            Button("Deny", role: .destructive) {
+                                Task { await feed.deny(row, workspaces: Array(app.workspaces.values)) }
+                            }
+                            .disabled(feed.answering.contains(row.id))
+                            .accessibilityIdentifier("needsYou.deny")
+                        }
+                    }
+                }
+            }
+            let rows = snapshot.recent + feed.earlier.filter { row in !snapshot.recent.contains { $0.id == row.id } }
+            if !rows.isEmpty || feed.moreHistory && !(snapshot.sources ?? []).isEmpty {
+                SidebarSectionTitle(title: String(localized: "Earlier"))
+                ForEach(rows) { row in
+                    entry(row, detail: historyDetail(row)) { EmptyView() }
+                }
+                if feed.moreHistory {
+                    SidebarNavRow(title: "Load Earlier", symbol: "clock") {
+                        Task { await feed.loadEarlier(Array(app.workspaces.values)) }
+                    }
+                    .disabled(feed.loadingHistory)
+                }
+            }
+            ForEach((snapshot.sources ?? []).filter { $0.state != .live }) { source in
+                SetupNote(status: source.setupStatus, actionTitle: String(localized: "Check Again")) {
+                    Task { await app.refreshLedger() }
+                }
+                .modifier(SidebarRowInsets())
+            }
+        } else {
+            SkeletonRows(count: 2)
+                .modifier(SidebarRowInsets())
+        }
+    }
+
+    private func entry<Actions: View>(_ row: LedgerRow, detail: String?, @ViewBuilder actions: () -> Actions) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title(row))
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("needsYou.request")
+            if let prompt = row.prompt, !prompt.isEmpty {
+                Text(VisibleText.of(prompt))
+                    .font(.footnote)
+                    .lineLimit(3)
+            }
+            Text(detail ?? row.profile)
+                .font(.footnote)
+                .foregroundStyle(Theme.secondaryText)
+            HStack { actions() }
+                .buttonStyle(.borderless)
+        }
+        .padding(.vertical, 8)
+        .modifier(SidebarRowInsets())
+    }
+
+    private func title(_ row: LedgerRow) -> String {
+        switch row.kind {
+        case "approval": String(localized: "Approval")
+        case "clarify": String(localized: "Question")
+        case "sudo", "secret": String(localized: "Password needed")
+        default: String(localized: "Request")
+        }
+    }
+
+    private func historyDetail(_ row: LedgerRow) -> String {
+        switch row.state {
+        case "answered": NeedsYouFeed.answeredBy(row.answeredBy)
+        case "lost_on_restart": String(localized: "Gateway restarted before this was answered")
+        case "expired": String(localized: "Timed out")
+        default: String(localized: "No longer pending")
+        }
+    }
+}
 
 // MARK: - Filters
 

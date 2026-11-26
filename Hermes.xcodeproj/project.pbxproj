@@ -333,6 +333,7 @@
 		F0A3477C00DA2A76F45FA06D /* StatusWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB30525D8A95CBD738F107D3 /* StatusWidgets.swift */; };
 		F109AA3D6EB3110B99205458 /* FileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 800A1DDDF79BE426877E7DB1 /* FileModels.swift */; };
 		F2F8579E495B07941AF6A40A /* ArtifactViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEB322F91E634BC83629682A /* ArtifactViews.swift */; };
+		F3A8B4793BA63291B9FDD6E3 /* NeedsYouFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = E67CCAC901C52C150C5AAA42 /* NeedsYouFeed.swift */; };
 		F4BC175775974706D1F2D325 /* PaymentApprovalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC4195B5E81707A9DCBD12F7 /* PaymentApprovalCard.swift */; };
 		F51BE6C1A76C75CDE795DB3D /* MemoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B84164182BC8A67B056F80BA /* MemoryModel.swift */; };
 		F62D0A56E57E187470CCC1A2 /* BotChatViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 194CF757A863916B13EA8DC4 /* BotChatViews.swift */; };
@@ -687,6 +688,7 @@
 		E47BA9AF3C026D6EEF719EF1 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		E4AC7B02CFA9FE0E6B8A90D7 /* LearningMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningMapView.swift; sourceTree = "<group>"; };
 		E5E9FE47B3778AAB2835765C /* CallViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallViews.swift; sourceTree = "<group>"; };
+		E67CCAC901C52C150C5AAA42 /* NeedsYouFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeedsYouFeed.swift; sourceTree = "<group>"; };
 		E6B3BFADA7A44AF8A1EDADB1 /* LearnedPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearnedPages.swift; sourceTree = "<group>"; };
 		EA58CBFF18B5FB32D195421B /* LoadTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadTrace.swift; sourceTree = "<group>"; };
 		EA5F91A046860A0117EA19BB /* HermesMacSupport */ = {isa = PBXFileReference; lastKnownFileType = folder; name = HermesMacSupport; path = Packages/HermesMacSupport; sourceTree = SOURCE_ROOT; };
@@ -802,6 +804,7 @@
 				7A1FBF2823B6FF09B3D0962A /* LiveActivity.swift */,
 				FA4160B308F62A2D92BE857D /* LocalLaunchJobs.swift */,
 				B84164182BC8A67B056F80BA /* MemoryModel.swift */,
+				E67CCAC901C52C150C5AAA42 /* NeedsYouFeed.swift */,
 				82CC3748A7915100752F739A /* PasswordsModel.swift */,
 				7CA0BB83A82A59A27A029BAF /* PluginHubModel.swift */,
 				BCE8194331DB2E9630C792EE /* Preferences.swift */,
@@ -1932,6 +1935,7 @@
 				EF81CF40C102D2FAA2D51ECB /* MemoryView.swift in Sources */,
 				A37442CB11F0646DFDE70BE0 /* ModelPicker.swift in Sources */,
 				2781B9569789A85414C563C4 /* Motion.swift in Sources */,
+				F3A8B4793BA63291B9FDD6E3 /* NeedsYouFeed.swift in Sources */,
 				A15456F7B17E325EFB6FA50C /* NotificationSettingsView.swift in Sources */,
 				3A4709097976927BCDCCB27E /* NowPlayingPublisher.swift in Sources */,
 				FBACED70EE23785F2AE76DEF /* NumbersWidgets.swift in Sources */,

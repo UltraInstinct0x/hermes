@@ -148,7 +148,7 @@ final class SetupCenter {
             GatewaySetup.botReplies(facts),
             GatewaySetup.botScreen(facts),
             GatewaySetup.learned(facts),
-        ].compactMap { $0 }.map(shown)
+        ].compactMap { $0 }.map(shown) + (workspace?.ledgerSources.map(\.setupStatus) ?? [])
     }
 
     /// The app's plugins and push: what reaches this device.
@@ -371,6 +371,7 @@ final class SetupCenter {
         guard let workspace else { return }
         isChecking = true
         defer { isChecking = false }
+        async let ledger: Void? = workspace.app?.refreshLedger()
         // Notification permission comes from PushCenter, which reads it whenever the app comes to
         // the front; awaiting the system for it here could hang the check (it did on a simulator).
         DeviceSetup.shared.refresh()
@@ -455,6 +456,7 @@ final class SetupCenter {
         // Voice keeps its own statuses (`docs/voice.md` §6.1), Can't check without Bot Mode.
         reads.append(Task { await workspace.voiceSetup.checkSetup() })
         for read in reads { await read.value }
+        _ = await ledger
         pending = []
         hasChecked = true
     }

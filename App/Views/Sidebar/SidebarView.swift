@@ -31,6 +31,9 @@ struct SidebarView: View {
 
     private var query: String { workspace.searchText.trimmingCharacters(in: .whitespaces) }
     private var isSearching: Bool { !query.isEmpty }
+    private var showsNeedsYou: Bool {
+        botRoster == nil && !isSearching && workspace.inboxFilter == .needsYou
+    }
 
     /// iPhone's connection status: the subtitle under the large title, or from AX1 up the list's
     /// first row, where it wraps instead of being cut off (`docs/design-to-swiftui.md` §6).
@@ -90,6 +93,13 @@ struct SidebarView: View {
                 LaunchTrace.mark("every chat listed (\(workspace.inboxSessions.count))", id: "every chat listed")
             }
             .onDisappear { workspace.activity.listDisappeared() }
+            .task(id: showsNeedsYou) {
+                guard showsNeedsYou else { return }
+                while !Task.isCancelled {
+                    await app.refreshLedger()
+                    do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                }
+            }
             .modifier(ArchivedToast(workspace: workspace) { actionError = $0 })
             .sensoryFeedback(.selection, trigger: workspace.sidebarMode)
             .refreshable { await refresh() }
@@ -212,6 +222,9 @@ struct SidebarView: View {
         } else if isSearching {
             // What was said, not only titles (`docs/search.md`).
             SearchResultsSection(workspace: workspace)
+        } else if showsNeedsYou {
+            NeedsYouRows(app: app, windowID: router?.windowID)
+            sessionSections
         } else {
             sessionSections
         }
@@ -490,6 +503,12 @@ struct SidebarView: View {
             if workspace.search.isEmpty {
                 SearchEmptyState(search: workspace.search)
             }
+        } else if showsNeedsYou {
+            if let ledger = app.needsYou.snapshot, ledger.open.isEmpty, ledger.recent.isEmpty,
+               ledger.sources?.allSatisfy({ $0.state == .live }) != false, workspace.inboxSessions.isEmpty {
+                CaughtUpState(filter: .needsYou)
+                    .allowsHitTesting(false)
+            }
         } else if workspace.showHoldsNothing {
             // The gateway has chats, none of them from where Show looks (`docs/inbox.md` §5), so
             // that is what an Only on top of it shows too.
@@ -577,7 +596,9 @@ struct SidebarView: View {
     // MARK: Actions
 
     private func refresh() async {
-        if let botRoster {
+        if showsNeedsYou {
+            await app.refreshLedger()
+        } else if let botRoster {
             await botRoster.refresh()
         } else {
             await workspace.refreshSessions()
