@@ -6356,14 +6356,17 @@ extension ConversationModel {
 
     private func syncLedgerCards() async {
         guard let roster = gatewayRoster, let runtime = runtimeSessionID, !Task.isCancelled else { return }
-        var params: [String: JSONValue] = ["session_id": .string(runtime), "omit_messages": .bool(true)]
-        if let profile = gatewayProfile { params["profile"] = .string(profile) }
         let approval = ledgerApproval?.reference
         let clarification = ledgerClarification?.reference
+        guard let owner = approval?.sessionId ?? clarification?.sessionId else { return }
+        var params: [String: JSONValue] = ["session_id": .string(owner), "omit_messages": .bool(true)]
+        if let profile = gatewayProfile { params["profile"] = .string(profile) }
         // Unlike events.since, resume on the attached chat includes the canonical prompts.
         guard let snapshot = try? await roster.request("session.resume", params, timeout: .seconds(10)),
-              runtime == runtimeSessionID, snapshot["session_id"]?.stringValue == runtime, !Task.isCancelled else { return }
-        if let open = RequestSync.openIDs(snapshot["open_requests"]) { takeDownEndedRequests(open: open) }
+              runtime == runtimeSessionID, !Task.isCancelled else { return }
+        if snapshot["session_id"]?.stringValue == runtime, let open = RequestSync.openIDs(snapshot["open_requests"]) {
+            takeDownEndedRequests(open: open)
+        }
         if ledgerApproval?.reference == approval, ledgerClarification?.reference == clarification {
             takeDownEndedLedgerCards(in: snapshot)
         }

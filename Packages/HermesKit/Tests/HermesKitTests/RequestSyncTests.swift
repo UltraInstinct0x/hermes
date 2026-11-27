@@ -60,4 +60,14 @@ struct RequestSyncTests {
         #expect(!ended(nil))
         #expect(!ended([], session: "other"))
     }
+
+    @Test func aStoredSessionResumeCanReturnARuntimeAliasAfterSettlement() {
+        let snapshot: JSONValue = .object([
+            "session_id": .string("runtime"), "resumed": .string("stored-chat"), "prompts": .array([]),
+        ])
+        #expect(RequestSync.nativePromptEnded(in: snapshot, sessionID: "stored-chat", promptID: "prompt",
+                                             generation: 7, kind: "clarify"))
+        #expect(!RequestSync.nativePromptEnded(in: snapshot, sessionID: "other-chat", promptID: "prompt",
+                                              generation: 7, kind: "clarify"))
+    }
 }

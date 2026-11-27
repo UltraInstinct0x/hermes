@@ -59,3 +59,18 @@ class NativeRequestAnswers(MockCase):
         self.assertEqual(self.rpc(chat, "clarify.respond", params)["result"],
                          {"status": "resolved", "prompt_id": prompt["prompt_id"]})
         self.assertEqual(self.rpc(chat, "session.resume", {"session_id": session})["result"]["prompts"], [])
+
+    def test_chat_sync_resumes_the_stored_session_after_settlement(self):
+        chat, runtime, session = self.open_chat()
+        self.assertNotEqual(runtime, session)
+        self.assertIn("result", self.submit(chat, runtime, "native clarify", submission_id="chat-sync"))
+        prompt = self.until_event(chat, "clarify.request")
+        self.assertEqual(self.rpc(chat, "session.resume", {"session_id": session})["result"]["prompts"], [prompt])
+        params = dict(session_id=session, execution_generation=prompt["execution_generation"],
+                      prompt_id=prompt["prompt_id"], answer="Other device")
+        self.assertEqual(self.rpc(chat, "clarify.respond", params)["result"]["status"], "resolved")
+        self.assertEqual(self.rpc(chat, "session.resume", {"session_id": runtime})["error"]["message"], "session not found")
+        snapshot = self.rpc(chat, "session.resume", {"session_id": session, "omit_messages": True})["result"]
+        self.assertEqual(snapshot["session_id"], runtime)
+        self.assertEqual(snapshot["resumed"], session)
+        self.assertEqual(snapshot["prompts"], [])
