@@ -305,7 +305,25 @@ import Testing
         #expect(json["live_activity"]?.boolValue == true)
     }
 
-    @Test func appPushClientSpeaksCommandDispatch() async throws {
+    @Test func configuredAPNsEnvironmentSelectsTheSameHostForAlertsAndVoIP() {
+        let debug = APNsEnvironment(entitlement: "development")
+        #expect(debug.rawValue == "development")
+        #expect(debug.boxValue == "sandbox")
+        let release = APNsEnvironment(entitlement: "production")
+        #expect(release.rawValue == "production")
+        #expect(release.boxValue == "production")
+        #expect(APNsEnvironment(entitlement: nil) == .production)
+        #expect(APNsEnvironment(entitlement: "unknown") == .production)
+    }
+
+    @Test func simulatorUsesSandboxEvenWithAProductionEntitlement() {
+        let simulator = APNsEnvironment(entitlement: "production", isSimulator: true)
+        #expect(simulator.rawValue == "development")
+        #expect(simulator.boxValue == "sandbox")
+    }
+
+    @Test(arguments: ["development", "production"])
+    func appPushClientSpeaksCommandDispatch(entitlement: String) async throws {
         let calls = Calls()
         let client = AppPushClient { method, params in
             await calls.add(method, params)
@@ -314,7 +332,8 @@ import Testing
             }
             return .object(["type": .string("plugin"), "output": .string(#"{"ok": true, "gateway": {"id": "inst_x", "name": "mac"}, "relay": "ok", "version": "1.0.0"}"#)])
         }
-        let device = AppPushClient.Device(id: "dev-1", token: "ab12", topic: "co.caffeinatedcode.hermes.dev", environment: "development",
+        let device = AppPushClient.Device(id: "dev-1", token: "ab12", topic: "co.caffeinatedcode.hermes.dev",
+                                          environment: APNsEnvironment(entitlement: entitlement).rawValue,
                                           publicKey: "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=", platform: "ios", name: "iPhone", appVersion: "1.0")
         let registration = try await client.register(device, preferences: PushPreferences())
         #expect(registration == .init(installationID: "inst_x", gatewayName: "mac", relay: "ok", version: "1.0.0"))
@@ -326,6 +345,7 @@ import Testing
         #expect(arg.hasPrefix("register {"))
         let json = try JSONDecoder().decode(JSONValue.self, from: Data(arg.dropFirst("register ".count).utf8))
         #expect(json["device_id"]?.stringValue == "dev-1" && json["preferences"]?["tasks"]?.stringValue == "all")
+        #expect(json["environment"]?.stringValue == entitlement)
 
         let missing = AppPushClient { _, _ in throw GatewayRPCError(code: 4018, message: "not a quick/plugin/bundle/skill command: app-push") }
         await #expect(throws: AppPushClient.Failure.notInstalled) { try await missing.status(deviceID: "dev-1") }

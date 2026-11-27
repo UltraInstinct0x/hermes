@@ -65,13 +65,7 @@ final class NeoBox {
         pairing = PairingService(transport: http, secrets: KeychainSecretStore(service: service), deviceLabel: Self.deviceLabel)
         let links = NeoCallLinks(http: http, authorizer: pairing.authorizer())
         self.links = links
-        #if DEBUG
-        let debugFallback = true
-        #else
-        let debugFallback = false
-        #endif
-        let environment = ApsEnvironment.current(
-            profileURL: Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"), isSimulatorOrDebugFallback: debugFallback)
+        let environment = APNsEnvironment.current.boxValue
         voip = VoIPRegistrar(environment: environment, topic: Bundle.main.bundleIdentifier, store: UserDefaultsCallsFromBots())
         let push = PushRegistrar(platform: NeoRemotePlatform(environment: environment), topic: Bundle.main.bundleIdentifier, state: UserDefaultsPushState())
         self.push = push

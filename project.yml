@@ -110,7 +110,8 @@ targets:
         product: WebRTC
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(HERMES_APP_BUNDLE_ID)
+        # Xcode Cloud uses the app target's explicit bundle ID to match its App Store Connect record.
+        PRODUCT_BUNDLE_IDENTIFIER: dev.supersaiyan.hermesneo
         PRODUCT_NAME: Hermes
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
@@ -166,7 +167,6 @@ targets:
         # settings and icon, and the only builds that can bootstrap the demo gateway.
         # Release (TestFlight / App Store) is the real "Hermes" and never touches demo data.
         Debug:
-          PRODUCT_BUNDLE_IDENTIFIER: $(HERMES_APP_BUNDLE_ID)
           INFOPLIST_KEY_CFBundleDisplayName: Hermes Neo
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIconDev
           HERMES_URL_SCHEME: hermesapp-dev
@@ -174,15 +174,10 @@ targets:
           # a developer portal write makes, so it keeps hidden plugins on this Mac.
           "HERMES_ICLOUD_KEY_VALUE_SYNC[sdk=macosx*]": NO
         Release:
-          PRODUCT_BUNDLE_IDENTIFIER: $(HERMES_APP_BUNDLE_ID)
           INFOPLIST_KEY_CFBundleDisplayName: Hermes Neo
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-          # iOS releases sign by hand with the App Store profiles (Scripts/release.sh downloads them):
-          # the app and its three extensions each have one. The Mac signs by hand with Developer ID
-          # and its Developer ID profile, which carries the iCloud key-value entitlement.
-          "CODE_SIGN_STYLE[sdk=iphoneos*]": Manual
-          "CODE_SIGN_IDENTITY[sdk=iphoneos*]": Apple Distribution
-          "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]": Hermes App Store iCloud
+          # Neo's iOS archive uses automatic signing for Xcode Cloud. Mac releases still use
+          # the Developer ID profile, which carries the iCloud key-value entitlement.
           "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Push/App/Hermes-macOS.entitlements
           "CODE_SIGN_STYLE[sdk=macosx*]": Manual
           "CODE_SIGN_IDENTITY[sdk=macosx*]": Developer ID Application
@@ -210,12 +205,8 @@ targets:
         INFOPLIST_KEY_WKApplication: YES
         INFOPLIST_KEY_WKCompanionAppBundleIdentifier: $(HERMES_APP_BUNDLE_ID)
         INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp: NO
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-      configs:
-        Release:
-          "CODE_SIGN_STYLE[sdk=watchos*]": Manual
-          "CODE_SIGN_IDENTITY[sdk=watchos*]": Apple Distribution
-          "PROVISIONING_PROFILE_SPECIFIER[sdk=watchos*]": Hermes Watch App Store
 
   HermesWatchUITests:
     type: bundle.ui-testing
@@ -250,11 +241,6 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Push/NotificationService/NotificationService.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: YES
-      configs:
-        Release:
-          "CODE_SIGN_STYLE[sdk=iphoneos*]": Manual
-          "CODE_SIGN_IDENTITY[sdk=iphoneos*]": Apple Distribution
-          "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]": Hermes Notifications App Store
 
   HermesNotificationContent:
     type: app-extension
@@ -279,11 +265,6 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Push/NotificationContent/NotificationContent.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: YES
-      configs:
-        Release:
-          "CODE_SIGN_STYLE[sdk=iphoneos*]": Manual
-          "CODE_SIGN_IDENTITY[sdk=iphoneos*]": Apple Distribution
-          "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]": Hermes Requests App Store
 
   HermesWidgets:
     type: app-extension
@@ -317,11 +298,6 @@ targets:
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) HERMES_WIDGET"
         TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: YES
-      configs:
-        Release:
-          "CODE_SIGN_STYLE[sdk=iphoneos*]": Manual
-          "CODE_SIGN_IDENTITY[sdk=iphoneos*]": Apple Distribution
-          "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]": Hermes Widgets App Store
 
   # UI tests against the mock gateway (docs/development.md): start Tools/mock-hermes/backend.py first.
   HermesUITests:

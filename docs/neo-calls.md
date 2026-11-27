@@ -42,9 +42,16 @@ an app that leaves a VoIP push unreported and stops sending it VoIP pushes after
 | App glue | `App/Calls`: `NeoBox` (made at launch), `NeoPushKitHost`, `NeoCallKitHost`, `NeoCallAudio`, settings, call screen |
 
 The box contract (`box/bff`): `POST /bff/pair/gateway`; `POST /bff/push/voip/register {token, environment,
-topic}` where `topic` is the app's bundle id and `environment` is `sandbox` for a build with a development profile,
-`production` otherwise; `DELETE /bff/push/voip/register`; `GET /bff/push/apns/status` (`voip`);
+topic}` where `topic` is the app's bundle id and `environment` is explicitly `sandbox` in Debug
+and on the simulator, or `production` on a Release device; `DELETE /bff/push/voip/register`;
+`GET /bff/push/apns/status` (`voip`);
 `POST /bff/call-owner/test-ring`; the call socket `/gw/<id>/api/call/ws` (`box/call-hub/protocol.mjs`).
+
+On a device the app reads the push environment from the build setting that supplies its
+`aps-environment` entitlement. Neo registers VoIP tokens and Lock Screen request tokens with the
+box using `sandbox` or `production`. Sealed alerts register separately through the
+[gateway plugin](notifications.md), which calls the sandbox `development`; the box's sealed push
+relay translates it to `sandbox` when sending to APNs.
 
 ## 4. Pairing on the gateway login
 
