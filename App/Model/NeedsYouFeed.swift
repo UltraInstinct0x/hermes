@@ -36,6 +36,7 @@ final class NeedsYouFeed {
     private(set) var answering: Set<LedgerRow.ID> = []
     private(set) var receipts: [LedgerRow.ID: String] = [:]
     private(set) var requestNames: [LedgerRow.ID: RequestNames] = [:]
+    private(set) var lookupRetries: [LedgerRow.ID: Int] = [:]
 
     struct RequestNames: Sendable {
         let installID: String?
@@ -55,6 +56,7 @@ final class NeedsYouFeed {
     }
 
     @ObservationIgnored private var routes: [LedgerRow.ID: Route] = [:]
+    @ObservationIgnored private var failedLookups: Set<LedgerRow.ID> = []
     @ObservationIgnored private var cursors: [UUID: Cursor] = [:]
     @ObservationIgnored private var boxWorkspaces: Set<UUID> = []
     @ObservationIgnored private var boxLiveSources: [UUID: Set<LedgerSource.ID>] = [:]
@@ -122,6 +124,11 @@ final class NeedsYouFeed {
                 workspace.ledgerSources = merged.sources ?? []
             }
             routes = routing
+            lookupRetries = lookupRetries.filter { routing[$0.key] != nil }
+            for id in failedLookups where routing[id] != nil && requestNames[id] == nil {
+                lookupRetries[id, default: 0] += 1
+            }
+            failedLookups.removeAll()
             for (workspaceID, live) in liveBoxSources where !live.isSubset(of: boxLiveSources[workspaceID] ?? []) {
                 cursors.removeValue(forKey: workspaceID)
             }
@@ -240,29 +247,35 @@ final class NeedsYouFeed {
     }
 
     func loadRequestNames(_ row: LedgerRow) async {
-        guard requestNames[row.id] == nil, let route = routes[row.id] else { return }
+        guard !Task.isCancelled, requestNames[row.id] == nil, let route = routes[row.id] else { return }
         let profile = row.profileID ?? row.profile
-        let names = try? await Self.withRoute(route) { request in
-            let profiles = try? await request("profiles.list", ["include_sessions": .bool(false)])
-            let installID = profiles?["install_id"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
-            let bot = profiles?["profiles"]?.arrayValue?.first { $0["name"]?.stringValue == profile }.map(BotProfile.init(json:))
-            guard let id = row.sessionID else { return RequestNames(installID: installID, bot: bot?.title, chat: nil, approval: nil) }
-            let list = try? await request("session.list", [
-                "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
-            ])
-            let chat = list?["sessions"]?.arrayValue?.first {
-                $0["id"]?.stringValue == id || $0["resolved_id"]?.stringValue == id
+        do {
+            let names = try await Self.withRoute(route) { request in
+                let profiles = try await request("profiles.list", ["include_sessions": .bool(false)])
+                let installID = profiles["install_id"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+                let bot = profiles["profiles"]?.arrayValue?.first { $0["name"]?.stringValue == profile }.map(BotProfile.init(json:))
+                guard let id = row.sessionID else { return RequestNames(installID: installID, bot: bot?.title, chat: nil, approval: nil) }
+                let list = try await request("session.list", [
+                    "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
+                ])
+                let chat = list["sessions"]?.arrayValue?.first {
+                    $0["id"]?.stringValue == id || $0["resolved_id"]?.stringValue == id
+                }
+                let approval: ApprovalRequest?
+                if row.kind == "approval" {
+                    let snapshot = try await request("session.resume", Self.resume(id, profile: profile))
+                    approval = row.approval(in: snapshot)
+                } else {
+                    approval = nil
+                }
+                return RequestNames(installID: installID, bot: bot?.title, chat: chat?["title"]?.stringValue, approval: approval)
             }
-            let approval: ApprovalRequest?
-            if row.kind == "approval",
-               let snapshot = try? await request("session.resume", Self.resume(id, profile: profile)) {
-                approval = row.approval(in: snapshot)
-            } else {
-                approval = nil
-            }
-            return RequestNames(installID: installID, bot: bot?.title, chat: chat?["title"]?.stringValue, approval: approval)
+            guard !Task.isCancelled else { return }
+            requestNames[row.id] = names
+            failedLookups.remove(row.id)
+        } catch {
+            if !Task.isCancelled, requestNames[row.id] == nil { failedLookups.insert(row.id) }
         }
-        if let names { requestNames[row.id] = names }
     }
 
     private static func resume(_ session: String, profile: String) -> [String: JSONValue] {

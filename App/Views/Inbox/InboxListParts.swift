@@ -38,7 +38,7 @@ struct NeedsYouRows: View {
                                 .buttonStyle(.borderless)
                         }
                     }
-                    .task(id: row.id) { await feed.loadRequestNames(row) }
+                    .task(id: feed.lookupRetries[row.id, default: 0]) { await feed.loadRequestNames(row) }
                 }
             }
             let rows = snapshot.recent + feed.earlier.filter { row in !snapshot.recent.contains { $0.id == row.id } }
