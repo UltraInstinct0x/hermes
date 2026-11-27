@@ -27,13 +27,13 @@ final class RequestCardUITests: XCTestCase {
             XCTAssertEqual(approvals.count, 2, "The two open approvals should only appear under Needs You")
             XCTAssertFalse(app.staticTexts["Waiting for your approval"].exists)
             let loadEarlier = app.buttons["Load Earlier"]
-            XCTAssertTrue(loadEarlier.waitForExistence(timeout: 10))
             app.swipeUp()
+            XCTAssertTrue(loadEarlier.waitForExistence(timeout: 10))
             loadEarlier.tap()
             let ready = NSPredicate(format: "exists == false OR enabled == true")
             await fulfillment(of: [XCTNSPredicateExpectation(predicate: ready, object: loadEarlier)], timeout: 10)
-            XCTAssertEqual(approvals.count, 2, "History paging must not add open approvals to Earlier")
             app.swipeDown()
+            XCTAssertEqual(approvals.count, 2, "History paging must not add open approvals to Earlier")
             attachScreenshot("needs-you-before-answering-\(appearance)")
         }
     }
