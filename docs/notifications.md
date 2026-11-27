@@ -502,6 +502,9 @@ Neo verifies the live question and uses a frame response. If the Box omits
 the session and choice fields, the notification opens the app instead.
 There is no Box answer endpoint. An expired or replaced request is not retried against
 another prompt.
+If the request is no longer waiting or its ledger cannot be reached, an activity button asks
+iOS to bring Neo forward on that request. If iOS does not allow the transition, the activity
+still opens the exact request on a tap, and Neo posts a tappable alert when permitted.
 
 For a local simulator check, launch a Debug build with
 `-NEO_REQUEST_ACTIVITY_DEMO approval` or `-NEO_REQUEST_ACTIVITY_DEMO clarify`, then

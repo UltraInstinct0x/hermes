@@ -4,7 +4,8 @@ import HermesActivityKit
 
 @MainActor
 protocol NeoActivityButtonHandling: AnyObject {
-    func answerActivity(reference: RequestReference, shown: String, action: RequestActivityPresentation.Action) async
+    func answerActivity(reference: RequestReference, shown: String, action: RequestActivityPresentation.Action) async -> Bool
+    func openActivityRequest(_ reference: RequestReference, foregrounded: Bool) async
 }
 
 @MainActor
@@ -15,7 +16,7 @@ enum NeoActivityButtonRouter {
 struct NeoAnswerRequestIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Answer a request"
     static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
-    static var openAppWhenRun: Bool { false }
+    static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
 
     @Parameter(title: "Bot") var botKey: String
     @Parameter(title: "Request") var requestId: String
@@ -47,7 +48,17 @@ struct NeoAnswerRequestIntent: LiveActivityIntent {
                                             executionGeneration: executionGeneration == -1 ? nil : executionGeneration),
            index >= -2 {
             let action: RequestActivityPresentation.Action = index == -1 ? .approve : index == -2 ? .deny : .choice(index: index, label: choice)
-            await NeoActivityButtonRouter.handler?.answerActivity(reference: reference, shown: shown, action: action)
+            if let handler = NeoActivityButtonRouter.handler,
+               await handler.answerActivity(reference: reference, shown: shown, action: action) {
+                let foregrounded: Bool
+                do {
+                    try await continueInForeground(alwaysConfirm: false)
+                    foregrounded = true
+                } catch {
+                    foregrounded = false
+                }
+                await handler.openActivityRequest(reference, foregrounded: foregrounded)
+            }
         }
         return .result()
     }

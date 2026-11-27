@@ -5,7 +5,6 @@ import HermesActivityKit
 import HermesBox
 import HermesKit
 import Observation
-import UIKit
 
 /// Hermes Neo: the owner's box (its BFF, `box/bff`) and the calls its Bots make to this phone.
 ///
@@ -317,16 +316,17 @@ final class NeoBox {
         workspace.selection = nil
     }
 
-    func answerRequest(_ reference: RequestReference, shown: String, selection: RequestSelection) async -> RequestActivityAttributes.ContentState.Outcome? {
+    func answerRequest(_ reference: RequestReference, shown: String, selection: RequestSelection) async
+        -> (outcome: RequestActivityAttributes.ContentState.Outcome?, opensRequest: Bool)? {
         guard lockScreen.approvals, !isPairing, let app else { return nil }
         switch await app.needsYou.lookupRequest(reference, workspaces: Array(app.workspaces.values)) {
         case .pending:
-            return await app.needsYou.answerNativeRequest(reference, selection: selection, shown: shown)
+            guard let outcome = await app.needsYou.answerNativeRequest(reference, selection: selection, shown: shown) else { return nil }
+            return (outcome, outcome == .noLongerWaiting)
         case .notPending:
-            return .noLongerWaiting
+            return (.noLongerWaiting, true)
         case .unavailable:
-            await UIApplication.shared.open(ActivityLink.request(reference).url)
-            return nil
+            return (nil, true)
         }
     }
 

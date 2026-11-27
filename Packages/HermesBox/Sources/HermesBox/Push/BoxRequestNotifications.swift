@@ -39,6 +39,11 @@ public enum BoxRequestNotifications {
         guard isBoxNotification(userInfo), let botKey = userInfo["botKey"] as? String else { return nil }
         if action == dismissAction { return .dismissed }
         if action == defaultAction, userInfo["needsApp"] as? Bool == true || userInfo["sessionId"] != nil {
+            if let url = (userInfo["neoRequestLink"] as? String).flatMap(URL.init(string:)),
+               case .request(let ref)? = ActivityLink(url: url), ref.botKey == botKey,
+               ref.requestId == userInfo["requestId"] as? String {
+                return .type(ref)
+            }
             if let state = contentState(userInfo), let ref = RequestReference(state) { return .type(ref) }
             if let requestId = userInfo["requestId"] as? String { return .lookup(botKey: botKey, requestId: requestId) }
         }
@@ -58,6 +63,11 @@ public enum BoxRequestNotifications {
         case .openToAnswer:
             return .open(botKey: botKey)
         }
+    }
+
+    public static func openRequestInfo(_ reference: RequestReference) -> [String: Any] {
+        ["botKey": reference.botKey, "requestId": reference.requestId, "needsApp": true,
+         "neoRequestLink": ActivityLink.request(reference).url.absoluteString]
     }
 
     public static func identifier(for action: RequestActivityPresentation.Action) -> String {

@@ -34,6 +34,18 @@ struct BoxRequestNotificationsTests {
         #expect(BoxRequestNotifications.reply(userInfo: ["botKey": "oracle::hermesbot"], action: "hermes.request.approve") == nil)
     }
 
+    @Test func aFollowUpAlertOpensTheExactRequestAndCannotAnswer() throws {
+        let ref = try #require(RequestReference(botKey: "oracle::hermesbot", requestId: "req-9",
+                                                sessionId: "session-1", executionGeneration: 7))
+        var info = BoxRequestNotifications.openRequestInfo(ref)
+        #expect(BoxRequestNotifications.reply(userInfo: info, action: BoxRequestNotifications.defaultAction) == .type(ref))
+        #expect(BoxRequestNotifications.reply(userInfo: info, action: BoxRequestNotifications.approveAction, answersEnabled: true)
+            == .open(botKey: ref.botKey))
+        info["requestId"] = "different"
+        #expect(BoxRequestNotifications.reply(userInfo: info, action: BoxRequestNotifications.defaultAction)
+            == .lookup(botKey: ref.botKey, requestId: "different"))
+    }
+
     @Test func theIdentifiersAreTheOnesTheBoxSends() {
         // box/bff/push-planner.mjs CATEGORIES
         #expect(BoxRequestNotifications.approvalCategory == "hermes.request.approval")

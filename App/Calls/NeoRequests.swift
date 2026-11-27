@@ -128,13 +128,16 @@ enum NeoNotificationRouting {
             case .type(let reference):
                 NeoBox.shared.openRequestLink(.request(reference))
             case .answer(let reference, let selection, let shown):
-                if let outcome = await NeoBox.shared.submitRequest(reference, shown: shown, selection: selection) {
+                let result = await NeoBox.shared.submitRequest(reference, shown: shown, selection: selection)
+                if let outcome = result?.outcome {
                     let center = UNUserNotificationCenter.current()
                     center.removeDeliveredNotifications(withIdentifiers: [identifier])
                     let receipt = UNMutableNotificationContent()
                     receipt.title = RequestActivityPresentation.finalLine(outcome, answeredBy: nil, answeredChoice: selection.receiptChoice)
+                    if result?.opensRequest == true { receipt.userInfo = BoxRequestNotifications.openRequestInfo(reference) }
                     try? await center.add(UNNotificationRequest(identifier: identifier, content: receipt, trigger: nil))
                 }
+                if result?.opensRequest == true { await UIApplication.shared.open(ActivityLink.request(reference).url) }
             case .dismissed:
                 break
             }
@@ -145,13 +148,13 @@ enum NeoNotificationRouting {
 }
 
 extension NeoBox: NeoActivityButtonHandling {
-    func answerActivity(reference: RequestReference, shown: String, action: RequestActivityPresentation.Action) async {
+    func answerActivity(reference: RequestReference, shown: String, action: RequestActivityPresentation.Action) async -> Bool {
         let matching = Activity<RequestActivityAttributes>.activities.filter { RequestReference($0.content.state) == reference }
-        guard matching.count == 1, let activity = matching.first else { return }
+        guard matching.count == 1, let activity = matching.first else { return false }
         let presentation = RequestActivityPresentation(activity.content.state)
         guard presentation.actions(lockScreenAnswersEnabled: NotificationCatalog.neoLockScreenAnswersEnabled,
                                    isStale: activity.activityState == .stale).contains(action),
-              presentation.textToVerify(for: action) == shown else { return }
+              presentation.textToVerify(for: action) == shown else { return false }
         let selection: RequestSelection
         switch action {
         case .approve, .deny:
@@ -159,14 +162,26 @@ extension NeoBox: NeoActivityButtonHandling {
         case .choice(_, let label):
             selection = .clarification(label, questionId: reference.isFrame ? activity.content.state.questionId : nil)
         case .openToAnswer, .typeAnAnswer:
-            return
+            return false
         }
-        _ = await submitRequest(reference, shown: shown, selection: selection)
+        return await submitRequest(reference, shown: shown, selection: selection)?.opensRequest == true
     }
 
-    func submitRequest(_ reference: RequestReference, shown: String, selection: RequestSelection) async -> RequestActivityAttributes.ContentState.Outcome? {
+    func openActivityRequest(_ reference: RequestReference, foregrounded: Bool) async {
+        if foregrounded, await UIApplication.shared.open(ActivityLink.request(reference).url) { return }
+        let alert = UNMutableNotificationContent()
+        alert.title = "Open Hermes Neo"
+        alert.body = "Tap to open this request in chat."
+        alert.userInfo = BoxRequestNotifications.openRequestInfo(reference)
+        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(
+            identifier: "neo-open-request-" + ActivityLink.request(reference).url.absoluteString, content: alert, trigger: nil))
+    }
+
+    func submitRequest(_ reference: RequestReference, shown: String, selection: RequestSelection) async
+        -> (outcome: RequestActivityAttributes.ContentState.Outcome?, opensRequest: Bool)? {
         guard NotificationCatalog.neoLockScreenAnswersEnabled,
-              let outcome = await answerRequest(reference, shown: shown, selection: selection) else { return nil }
+              let result = await answerRequest(reference, shown: shown, selection: selection) else { return nil }
+        guard let outcome = result.outcome else { return result }
         for activity in Activity<RequestActivityAttributes>.activities {
             var state = activity.content.state
             guard RequestReference(state) == reference, state.outcome == nil else { continue }
@@ -174,10 +189,7 @@ extension NeoBox: NeoActivityButtonHandling {
             if outcome == .answered { state.answeredChoice = selection.receiptChoice }
             await activity.update(ActivityContent(state: state, staleDate: nil))
         }
-        if outcome == .noLongerWaiting {
-            await UIApplication.shared.open(ActivityLink.request(reference).url)
-        }
-        return outcome
+        return result
     }
 }
 
