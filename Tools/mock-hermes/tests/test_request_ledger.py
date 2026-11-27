@@ -7,6 +7,8 @@ from test_sending import MockCase, Socket, TOKEN
 
 
 class RequestLedger(MockCase):
+    backend_args = ("--experimental-ledger-rpc",)
+
     def box(self, path):
         return self.call("GET", path, headers={"Cookie": f"bff_device={TOKEN}"})
 
@@ -145,3 +147,26 @@ class RequestLedger(MockCase):
         self.call("POST", "/api/mock/ledger-source", {"federation": False})
         self.addCleanup(self.call, "POST", "/api/mock/ledger-source", {"federation": True})
         self.assertEqual(self.box("/bff/ledger")[0], 404)
+
+
+class ReadOnlyLedger(MockCase):
+    def test_default_box_observes_only_an_exact_attached_response(self):
+        chat, runtime, stored = self.open_chat(profile="writer")
+        self.rpc(chat, "client.capabilities", {"server_requests": True})
+        self.submit(chat, runtime, "approve")
+        frame = self.until_request(chat, "approval")
+        self.assertNotIn("ledger_id", frame["params"])
+        reader = Socket(self.port, f"/api/ws?token={TOKEN}")
+        self.addCleanup(reader.close)
+        for method in ("request.list", "request.history", "request.answer"):
+            self.assertEqual(self.rpc(reader, method, {})["error"]["code"], -32601)
+        res = self.rpc(reader, "session.resume", {"session_id": stored, "profile": "writer"})["result"]
+        self.assertIn(frame["id"], [item["id"] for item in res["open_requests"]])
+        reader.send({"jsonrpc": "2.0", "id": frame["id"], "result": {"choice": "deny"}})
+        self.rpc(reader, "session.list", {"profile": "writer"})
+        status, snapshot = self.call("GET", "/bff/ledger", headers={"Cookie": f"bff_device={TOKEN}"})
+        self.assertEqual(status, 200)
+        settled = next(row for row in snapshot["recent"] if row["request_id"] == frame["id"])
+        self.assertEqual(settled["state"], "settled")
+        self.assertNotIn("answered_by", settled)
+        self.assertNotIn("outcome", settled)

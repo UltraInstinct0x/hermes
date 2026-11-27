@@ -516,8 +516,9 @@ simulator turns `simctl push` into a plain background fetch that never reaches
 `didReceiveRemoteNotification`, so the push handler itself only runs on a device.
 
 For the request ledger, send `approve` in two different Bot chats to open two independent
-requests. The backend serves the profile-scoped `request.list` and `request.history` socket
-methods and the authenticated `/bff/ledger` and `/bff/ledger/history` reads. Use
+requests. The mock serves the authenticated read-only `/bff/ledger` and
+`/bff/ledger/history` endpoints. Use `--experimental-ledger-rpc` only to exercise the gated
+future notification-answer contract. Use
 `POST /api/mock/ledger-source {profile_id, state}` to set a source to `live`, `unsupported`,
 `not_authorized`, `offline` or `error`, or send `{federation: false}` to simulate an older box.
 `POST /api/mock/answer-elsewhere` can take a `ledger_id` to settle one specific request.

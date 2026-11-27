@@ -3267,6 +3267,7 @@ def main():
                         help="two seeded chats look live (one writing, one waiting for an approval): inbox.py")
     parser.add_argument("--plain-edits", action="store_true",
                         help="session edits without revision fences, like Hermes from 2026-10-16 (no mutation-snapshot)")
+    parser.add_argument("--experimental-ledger-rpc", action="store_true")
     parser.add_argument("--push-relay", default="simctl",
                         help="where push notices go (push.py): simctl (the simulator that registered), a relay URL, "
                              "or none (no plugin)")
@@ -3446,7 +3447,7 @@ def main():
     _spec = _util.spec_from_file_location("mock_ledger", _pathlib.Path(__file__).resolve().parent / "ledger.py")
     _ledger = _util.module_from_spec(_spec)
     _spec.loader.exec_module(_ledger)
-    globals()["LEDGER"] = _ledger.Ledger(globals())
+    globals()["LEDGER"] = _ledger.Ledger(globals(), experimental_rpc=args.experimental_ledger_rpc)
     _spec = _util.spec_from_file_location("mock_push", _pathlib.Path(__file__).resolve().parent / "push.py")
     _push = _util.module_from_spec(_spec)
     _spec.loader.exec_module(_push)

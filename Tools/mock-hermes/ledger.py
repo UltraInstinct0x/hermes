@@ -15,15 +15,18 @@ SECRET = ("secret", "sudo")
 class Ledger:
     gateway_id = "mock-gateway"
 
-    def __init__(self, backend):
+    def __init__(self, backend, experimental_rpc=False):
         self.b = backend
         self.rows = {}
         self.states = {}
         self.federation = True
-        backend["METHODS"].update({
-            "request.list": self.list_requests, "request.history": self.history,
-            "request.answer": self.answer, "client.capabilities": self.capabilities,
-        })
+        self.experimental_rpc = experimental_rpc
+        self.settled_at = {}
+        backend["METHODS"]["client.capabilities"] = self.capabilities
+        if experimental_rpc:
+            backend["METHODS"].update({
+                "request.list": self.list_requests, "request.history": self.history, "request.answer": self.answer,
+            })
         backend["HTTP_ROUTES"].update({
             ("GET", "/bff/ledger"): lambda query, _: self.federated(query, history=False),
             ("GET", "/bff/ledger/history"): lambda query, _: self.federated(query, history=True),
@@ -90,7 +93,8 @@ class Ledger:
         if self.states.get(profile) != "unsupported":
             row["ledger_id"] = f"v1:mock-install-0001:{profile}:{rid}"
             self.rows[row["ledger_id"]] = row
-            params.update(ledger_id=row["ledger_id"], expires_at=row["expires_at"])
+            if self.experimental_rpc:
+                params.update(ledger_id=row["ledger_id"], expires_at=row["expires_at"])
         return row
 
     def settle(self, rid, *, result=None, by=None, via=None, state="answered", reason=None, notify=True):
@@ -110,8 +114,10 @@ class Ledger:
                        answered_at=time.time() if answered else None, answered_by=(by or UNKNOWN) if answered else None,
                        answered_via=via if answered else None, answers=answer.get("answers") if kind == "clarify" else None)
             entry["result"] = result
+            if not self.experimental_rpc and "ledger_id" in row:
+                self.settled_at[row["ledger_id"]] = time.time()
         try:
-            if answered and notify and "ledger_id" in row:
+            if self.experimental_rpc and answered and notify and "ledger_id" in row:
                 self.b["emit"](entry["sid"], "request.resolved", self.settlement(row))
         finally:
             entry["event"].set()
@@ -213,6 +219,9 @@ class Ledger:
         if not history:
             page = self.listing(rows, {})
             page["open"].reverse()
+            if not self.experimental_rpc:
+                page.update(open=self.public_rows(page["open"]), recent=self.public_rows(page["recent"]))
+                page["open_count"] = len(page["open"])
             return 200, {**page, "sources": sources}
         try:
             limit = int(query.get("limit", ["50"])[0])
@@ -232,7 +241,15 @@ class Ledger:
             for row in page:
                 cursor[self.source_key(row)] = (row["created_at"], row["request_id"])
             before = base64.urlsafe_b64encode(json.dumps(cursor, separators=(",", ":")).encode()).decode().rstrip("=")
-        return 200, {"requests": page, "next_before": before, "sources": sources}
+        return 200, {"requests": page if self.experimental_rpc else self.public_rows(page),
+                     "next_before": before, "sources": sources}
+
+    def public_rows(self, rows):
+        return [dict({key: row[key] for key in ("ledger_id", "request_id", "gateway_id", "profile_id", "profile",
+                                               "bot_key", "kind", "session_id", "created_at", "prompt", "choices")},
+                     state=("open" if row["state"] == "open" else "unverified" if row["state"] == "lost_on_restart" else "settled"),
+                     settled_at=self.settled_at.get(row["ledger_id"]), settlement_reason=row["cancel_reason"])
+                for row in rows if row["kind"] in ("approval", "clarify")]
 
     @staticmethod
     def source_key(row):
