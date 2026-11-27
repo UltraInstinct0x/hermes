@@ -316,6 +316,12 @@ import Testing
         #expect(APNsEnvironment(entitlement: "unknown") == .production)
     }
 
+    @Test func simulatorUsesSandboxEvenWithAProductionEntitlement() {
+        let simulator = APNsEnvironment(entitlement: "production", isSimulator: true)
+        #expect(simulator.rawValue == "development")
+        #expect(simulator.boxValue == "sandbox")
+    }
+
     @Test(arguments: ["development", "production"])
     func appPushClientSpeaksCommandDispatch(entitlement: String) async throws {
         let calls = Calls()
