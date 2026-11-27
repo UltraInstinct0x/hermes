@@ -36,6 +36,11 @@ public protocol CallAudioIO: AnyObject {
     var onPlaybackLevel: (@Sendable (Double) -> Void)? { get set }
     /// The engine failed in a way the call cannot survive (it would not stay up); the reason is for Copy details.
     var onFailure: (@MainActor (String) -> Void)? { get set }
+    /// Hermes Neo: started, but waiting for the system (CallKit) to make the audio session live; the microphone can't
+    /// deliver yet, so the silent-microphone watchdog waits too.
+    var isWaitingForSession: Bool { get }
+    /// Hermes Neo: how much of the reply now playing has been heard, 0...1; nil when nothing plays.
+    var playbackProgress: Double? { get }
 }
 
 extension CallAudioIO {
@@ -45,6 +50,8 @@ extension CallAudioIO {
     public var currentOutput: CallOutputKind { .speaker }
     public var captureDescription: String { "" }
     public var captureReport: [String] { [] }
+    public var isWaitingForSession: Bool { false }
+    public var playbackProgress: Double? { nil }
 }
 
 public enum MicrophoneAccess: Sendable, Equatable {

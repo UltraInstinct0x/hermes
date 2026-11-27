@@ -39,6 +39,8 @@ final class NeoBox {
 
     let voip: VoIPRegistrar
     let calls: CallController
+    /// The call's audio on the app's audio coordinator; CallKit tells it when the session is live.
+    @ObservationIgnored let callAudio: NeoCallAudio
 
     /// The app's gateways, whose login pairs this phone with the box. Set once the first window is up.
     @ObservationIgnored private weak var app: AppModel?
@@ -49,7 +51,7 @@ final class NeoBox {
     @ObservationIgnored private let rings: RingCoordinator
     @ObservationIgnored private var pushKit: NeoPushKitHost?
     /// The box's call as one of the app's Talk calls (the pill, End, its card in the bot's chat).
-    @ObservationIgnored private var talk: NeoTalkCall?
+    @ObservationIgnored private(set) var talk: NeoTalkCall?
 
     private init() {
         let http = URLSessionHTTPTransport()
@@ -66,6 +68,7 @@ final class NeoBox {
             profileURL: Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"), isSimulatorOrDebugFallback: debugFallback)
         voip = VoIPRegistrar(environment: environment, topic: Bundle.main.bundleIdentifier, store: UserDefaultsCallsFromBots())
         let audio = NeoCallAudio()
+        callAudio = audio
         let calls = CallController(
             makeLink: { links.makeCallLink(gatewayId: $0) }, audio: audio, audioSession: VoiceAudioSession(driver: audio),
             microphone: AppleCallMicrophone())

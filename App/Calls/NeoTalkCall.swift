@@ -16,7 +16,7 @@ final class NeoTalkCall: TalkDisplay {
     @ObservationIgnored private var watcher: Task<Void, Never>?
     @ObservationIgnored private var attached = false
     @ObservationIgnored private var recorded = false
-    var showsCaptions = false
+    var showsCaptions = true
 
     init(calls: CallController, box: NeoBox) {
         self.calls = calls
@@ -103,10 +103,17 @@ final class NeoTalkCall: TalkDisplay {
 
     var status: String { calls.stateLine }
 
+    /// Talk's caption: your words while you talk; while the bot talks, the sentence it says now, the words already heard
+    /// settled and the rest lighter, following the speaker (`CallCaptionProgress`); after it, its last sentence.
     var caption: (settled: String, lighter: String)? {
         guard let captions = calls.session?.captions else { return nil }
-        if let heard = captions.partialPerson { return (settled: "", lighter: heard) }
-        return captions.botLine.map { (settled: $0, lighter: "") }
+        if let heard = captions.partialPerson, !heard.isEmpty { return (settled: heard, lighter: "") }
+        guard let reply = captions.botLine else { return nil }
+        // Read with the level, which changes as the speaker plays: the caption follows it.
+        _ = calls.playbackLevel
+        let progress = calls.isPlaying ? (calls.playbackProgress ?? 0) : 1
+        let caption = CallCaptionProgress.split(reply, progress: progress)
+        return caption.settled.isEmpty && caption.lighter.isEmpty ? nil : caption
     }
 
     var hint: String? { nil }

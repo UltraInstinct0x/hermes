@@ -12,6 +12,8 @@ import SwiftUI
 /// Views hold no logic: every action is one call into `CallController`, every sentence comes from `CallPresentation`.
 struct NeoCallScreen: View {
     let calls: CallController
+    /// The call as the app's Talk call: what upstream's own captions (`TalkTexts`) read.
+    var talk: NeoTalkCall?
     /// The calling bot's chat, when the app has it: its waiting approval or question shows on the call screen.
     var waiting: ConversationModel?
 
@@ -154,17 +156,25 @@ struct NeoCallScreen: View {
     /// Two panes side by side, swiped like pages. The slide is the pager's own.
     private func paneContent(_ session: CallSession) -> some View {
         TabView(selection: $pane) {
-            NeoCallTranscript(
-                lines: CallTranscriptLine.lines(session.captions, botName: calls.bot?.name ?? "Bot"),
-                style: NeoCallTranscript.Style(rawValue: transcriptStyle) ?? .chat)
-                // The oldest line in view fades out under the indicator instead of being cut there.
-                .mask {
-                    VStack(spacing: 0) {
-                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 24)
-                        Color.black
-                    }
+            Group {
+                if isCaptions, let talk {
+                    // Upstream Talk's own captions: the sentence spoken now, heard words settled, the rest lighter.
+                    TalkTexts(session: talk, large: true, centered: true)
+                        .padding(.horizontal, 8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .onAppear { talk.showsCaptions = true }
+                } else {
+                    NeoCallTranscript(lines: CallTranscriptLine.lines(session.captions, botName: calls.bot?.name ?? "Bot"), style: .chat)
+                        // The oldest line in view fades out under the indicator instead of being cut there.
+                        .mask {
+                            VStack(spacing: 0) {
+                                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 24)
+                                Color.black
+                            }
+                        }
                 }
-                .tag(CallContentPane.transcript)
+            }
+            .tag(CallContentPane.transcript)
             NeoCallDisplayArea(items: calls.displayItems, onClear: { calls.clearDisplay() })
                 .tag(CallContentPane.screen)
         }

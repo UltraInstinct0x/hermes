@@ -53,6 +53,24 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
     private var playbackMeter: Task<Void, Never>?
     private var lastError: String?
 
+    // A CallKit call's session is CallKit's to make live (`provider(_:didActivate:)`). Nothing is started on the
+    // engine before then: an engine or player started on a session that isn't live fails (`kAUInitialize`), and
+    // nothing would try again. Speech that arrives meanwhile waits in `queued`.
+    /// The session is live: activated by the coordinator for an app role, or by CallKit for a CallKit call.
+    private var sessionLive = false
+    private var sessionWaiters: [CheckedContinuation<Void, Never>] = []
+    /// The microphone and the player are on the engine.
+    private var ready = false
+    /// The Bot's speech that came before the engine was ready, played in order once it is (about 15 s at most).
+    private var queued: [PlaybackChunk] = []
+    private var queuedSamples = 0
+    private static let queueLimit = 24_000 * 15
+    /// A start that failed once the session was live is tried once more on the next route or engine change.
+    private var retryOnChange: (@Sendable ([Int16]) -> Void)?
+    private var startAttempts = 0
+    /// Where the reply now playing started on the player's timeline (its progress for the captions).
+    private var replyStart: TimeInterval?
+
     init(coordinator: AudioCoordinator = .shared) {
         self.coordinator = coordinator
     }
@@ -78,8 +96,24 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
         giveBack()
     }
 
+    /// `provider(_:didActivate:)`: CallKit made the session live; a start that waits carries on.
+    func systemSessionActivated() {
+        sessionLive = true
+        let waiters = sessionWaiters
+        sessionWaiters = []
+        waiters.forEach { $0.resume() }
+    }
+
+    /// `provider(_:didDeactivate:)`.
+    func systemSessionDeactivated() {
+        sessionLive = false
+    }
+
     private func giveBack() {
         stop()
+        sessionLive = false
+        startAttempts = 0
+        systemSessionWaitersRelease()
         let acquiring = acquiring
         let lease = lease
         self.acquiring = nil
@@ -94,6 +128,12 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
                 await coordinator.release(taken)
             }
         }
+    }
+
+    private func systemSessionWaitersRelease() {
+        let waiters = sessionWaiters
+        sessionWaiters = []
+        waiters.forEach { $0.resume() }
     }
 
     func events() -> AsyncStream<AudioSessionEvent> {
@@ -116,6 +156,8 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
                     return
                 }
                 self.lease = lease
+                // An app role's session is live once the coordinator took it; a CallKit one waits for CallKit.
+                if wanted.systemActivation == nil { self.systemSessionActivated() }
                 self.follow(lease)
             } catch {
                 guard let self, self.acquiring == task else { return }
@@ -138,8 +180,10 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
                     self.sessionEvents?.yield(.interruptionEnded(shouldResume: true))
                 case .routeChanged:
                     self.sessionEvents?.yield(.routeChanged)
+                    self.retryAfterChange()
                 case .engineRestarted:
                     self.engineRestarted()
+                    self.retryAfterChange()
                 case .ended(let reason):
                     self.lease = nil
                     self.acquiring = nil
@@ -151,10 +195,22 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
         }
     }
 
-    /// The role, live: waits for it to be taken, and for a CallKit call marks the session active.
+    /// The role, live: waits for it to be taken and, for a CallKit call, for CallKit to make the session live (at most
+    /// 10 s; then it is tried anyway and a failure is retried on the next change), then marks it active.
     private func liveLease() async throws -> AudioLease {
         guard let task = acquiring else { throw AudioGraphError.noInput }
         let lease = try await task.value
+        if !sessionLive {
+            let timeout = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled else { return }
+                self?.systemSessionWaitersRelease()
+            }
+            await withCheckedContinuation { continuation in
+                if sessionLive { continuation.resume() } else { sessionWaiters.append(continuation) }
+            }
+            timeout.cancel()
+        }
         if options.systemActivation == .pending {
             options.systemActivation = .active
             try await coordinator.update(lease, options: options)
@@ -165,6 +221,15 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
     // MARK: CallAudioIO
 
     var isPlaying: Bool { pending > 0 }
+
+    var isWaitingForSession: Bool { running && !ready }
+
+    var playbackProgress: Double? {
+        guard pending > 0, let player, let replyStart else { return nil }
+        let heard = max(0, player.currentTime - replyStart)
+        let total = heard + player.queuedDuration
+        return total > 0 ? min(heard / total, 1) : nil
+    }
 
     func start(onSamples: @escaping @Sendable ([Int16]) -> Void, echoCancellation: Bool) throws {
         stop()
@@ -179,7 +244,7 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
             do {
                 guard let lease = try await self?.liveLease() else { return }
                 guard let self, mine == self.generation, self.running else { return }
-                try self.attach(to: lease.graph, onSamples: onSamples)
+                self.attachOrRetry(to: lease.graph, onSamples: onSamples)
             } catch {
                 guard let self, mine == self.generation else { return }
                 self.fail("the call audio could not start: \(error)")
@@ -187,12 +252,50 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
         }
     }
 
+    /// Attaches; a failure is said in Copy details and tried once more on the next route or engine change.
+    private func attachOrRetry(to graph: AudioGraph, onSamples: @escaping @Sendable ([Int16]) -> Void) {
+        startAttempts += 1
+        do {
+            try attach(to: graph, onSamples: onSamples)
+            retryOnChange = nil
+        } catch {
+            detachPartial(graph)
+            if startAttempts == 1 {
+                lastError = "start \(startAttempts) failed: \(error); trying again on the next route or engine change"
+                retryOnChange = onSamples
+                Self.logger.error("\(self.lastError ?? "", privacy: .public)")
+            } else {
+                retryOnChange = nil
+                fail("the call audio could not start (attempt \(startAttempts)): \(error)")
+            }
+        }
+    }
+
+    private func retryAfterChange() {
+        guard running, !ready, let onSamples = retryOnChange, let graph = lease?.graph else { return }
+        retryOnChange = nil
+        attachOrRetry(to: graph, onSamples: onSamples)
+    }
+
+    private func detachPartial(_ graph: AudioGraph) {
+        if let consumer { graph.removeInputConsumer(consumer) }
+        if let player { graph.removePlayer(player) }
+        consumer = nil
+        player = nil
+    }
+
     private func attach(to graph: AudioGraph, onSamples: @escaping @Sendable ([Int16]) -> Void) throws {
         let converter = CallTapConverter(emit: onSamples, onFirstBuffer: Self.firstBufferLogger())
         self.converter = converter
         consumer = try graph.addInputConsumer(Self.tapBlock(converter))
-        try makePlayer(rate: 24_000, in: graph)
-        Self.logger.info("call audio started on the shared engine")
+        try makePlayer(rate: queued.first.map { Double($0.sampleRate) } ?? 24_000, in: graph)
+        ready = true
+        Self.logger.info("call audio started on the shared engine (attempt \(self.startAttempts, privacy: .public))")
+        // Speech that came while the session was not live yet plays now, in order.
+        let waiting = queued
+        queued = []
+        queuedSamples = 0
+        waiting.forEach(play)
     }
 
     private func makePlayer(rate: Double, in graph: AudioGraph) throws {
@@ -210,6 +313,10 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
         starting = nil
         guard running else { return }
         running = false
+        ready = false
+        retryOnChange = nil
+        queued = []
+        queuedSamples = 0
         stopPlayback()
         if let graph = lease?.graph {
             if let consumer { graph.removeInputConsumer(consumer) }
@@ -267,12 +374,22 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
             "input route: \(route.map { "\($0.portName) (\($0.portType.rawValue))" } ?? "none")",
             "engine: running=\(lease?.graph.isRunning ?? false) system activation: \(options.systemActivation?.rawValue ?? "app")",
             "tap: \(converter?.summary ?? "none")",
+            "start attempts: \(startAttempts), session live: \(sessionLive), waiting for it: \(isWaitingForSession), speech waiting: \(queued.count)",
             "last audio error: \(lastError ?? "none")",
         ]
     }
 
     func play(_ chunk: PlaybackChunk) {
-        guard running, !chunk.pcm.isEmpty, let graph = lease?.graph else { return }
+        guard running, !chunk.pcm.isEmpty else { return }
+        // The engine isn't on yet (CallKit hasn't made the session live): the speech waits, the oldest dropped first.
+        guard ready, let graph = lease?.graph else {
+            queued.append(chunk)
+            queuedSamples += chunk.pcm.count / 2
+            while queuedSamples > Self.queueLimit, !queued.isEmpty {
+                queuedSamples -= queued.removeFirst().pcm.count / 2
+            }
+            return
+        }
         let rate = Double(chunk.sampleRate)
         if rate != playerRate || player == nil, pending == 0 {
             do { try makePlayer(rate: rate, in: graph) } catch {
@@ -287,6 +404,7 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
         else { return }
         for (index, sample) in samples.enumerated() { target[index] = Float(sample) / 32768 }
         buffer.frameLength = AVAudioFrameCount(samples.count)
+        if pending == 0 { replyStart = player.currentTime }
         pending += 1
         player.schedule(buffer, completion: Self.playbackCompletion(self, generation: playGeneration))
         startPlaybackMeter()

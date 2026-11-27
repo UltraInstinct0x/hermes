@@ -34,6 +34,8 @@ public final class CallController {
     /// about `levelRate` Hz so the screen does not redraw per buffer. The orb reads these directly.
     public private(set) var micLevel = 0.0
     public private(set) var playbackLevel = 0.0
+    /// Hermes Neo: how much of the reply now playing has been heard (read with `playbackLevel`, which redraws it).
+    public var playbackProgress: Double? { audio.playbackProgress }
     /// The last few `playbackLevel` values, for the travelling bars.
     public private(set) var playbackTrail = LevelTrail()
     /// Where the sound goes and why (the owner's choice, a connected device, the phone at the ear).
@@ -602,6 +604,12 @@ public final class CallController {
     }
 
     private func watchdogFired() {
+        // Hermes Neo: the audio waits for CallKit to make the session live; the microphone hasn't started yet.
+        if isInCall, audioRunning, micBatches == 0, audio.isWaitingForSession {
+            diag.watchdog = "waiting for the audio session"
+            armWatchdog()
+            return
+        }
         guard isInCall, audioRunning, micBatches == 0 else {
             if micBatches > 0 { diag.watchdog = "ok, audio arrived" }
             return

@@ -115,11 +115,18 @@ extension NeoCallKitHost: CXProviderDelegate {
     /// The session is CallKit's and live: the call's audio may start (`NeoCallAudio` marks the
     /// `.call` role active, and voice processing goes on, when the controller starts it).
     nonisolated func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
-        MainActor.assumeIsolated { coordinator?.audioActivated() }
+        MainActor.assumeIsolated {
+            // The call's audio first: it waits for this before it starts anything on the engine.
+            NeoBox.shared.callAudio.systemSessionActivated()
+            coordinator?.audioActivated()
+        }
     }
 
     nonisolated func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
-        MainActor.assumeIsolated { coordinator?.audioDeactivated() }
+        MainActor.assumeIsolated {
+            NeoBox.shared.callAudio.systemSessionDeactivated()
+            coordinator?.audioDeactivated()
+        }
     }
 
     nonisolated func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {

@@ -22,6 +22,13 @@ private struct NeoCallCover: ViewModifier {
     @State private var demoTalk: NeoTalkCall?
     #endif
 
+    private var talk: NeoTalkCall? {
+        #if DEBUG
+        if let demoTalk { return demoTalk }
+        #endif
+        return box.talk
+    }
+
     private var calls: CallController {
         #if DEBUG
         if let demo { return demo }
@@ -31,7 +38,19 @@ private struct NeoCallCover: ViewModifier {
 
     func body(content: Content) -> some View {
         let calls = self.calls
+        let center = TalkCenter.shared
         content
+            // A minimised call shows on every screen: upstream's own pill, at the top as a chat shows it, from here
+            // whenever no chat is showing its own.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let call = center.display, !center.isExpanded, center.chatPills == 0 {
+                    CallPill(session: call)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 6)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.snappy(duration: 0.25), value: center.display == nil || center.isExpanded || center.chatPills > 0)
             .fullScreenCover(isPresented: Binding(
                 // While it is the app's Talk call, Talk's expanded flag decides (the pill opens it, minimise hides it).
                 get: { TalkCenter.shared.external != nil ? TalkCenter.shared.isExpanded && calls.hasScreen : calls.isScreenShown },
@@ -41,7 +60,7 @@ private struct NeoCallCover: ViewModifier {
                     if TalkCenter.shared.external != nil { TalkCenter.shared.isExpanded = false }
                 }
             )) {
-                NeoCallScreen(calls: calls, waiting: box.waitingConversation(botKey: calls.bot?.botKey))
+                NeoCallScreen(calls: calls, talk: talk, waiting: box.waitingConversation(botKey: calls.bot?.botKey))
             }
             .task {
                 box.attach(model)

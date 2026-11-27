@@ -80,7 +80,7 @@ struct NeoCallTranscript: View {
     private func chat(_ line: CallTranscriptLine) -> some View {
         if line.isPerson {
             Text(line.text)
-                .font(.body)
+                .font(.title3)
                 .foregroundStyle(line.isLive ? Theme.tertiaryText : Theme.primaryText)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -90,7 +90,7 @@ struct NeoCallTranscript: View {
                 .accessibilityLabel("You: \(line.text)")
         } else {
             Text(line.text)
-                .font(.body)
+                .font(.title3)
                 .foregroundStyle(Theme.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)

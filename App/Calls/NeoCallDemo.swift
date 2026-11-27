@@ -64,7 +64,7 @@ nonisolated final class NeoDemoLink: CallLink, @unchecked Sendable {
 
     func speak() {
         push(frame(["type": "tts.start", "call_id": demoCallId, "reply_id": 1, "sample_rate": 24000, "text": "hi"]))
-        continuation.yield(.audio(replyId: 1, pcm: Data(repeating: 0, count: 4800)))
+        continuation.yield(.audio(replyId: 1, pcm: Data(repeating: 0, count: 48_000)))
     }
 
     func end() { push(frame(["type": "call.ended", "call_id": demoCallId, "reason": "ended_by_client"])) }
@@ -89,6 +89,8 @@ final class NeoDemoAudio: CallAudioIO {
     }
     func stop() { feed?.cancel() }
     func play(_ chunk: PlaybackChunk) { isPlaying = true }
+    /// Part way through the reply, for the captions.
+    var playbackProgress: Double? { isPlaying ? 0.8 : nil }
     func stopPlayback() { isPlaying = false }
     func routeChanged() throws {}
 }
@@ -135,7 +137,8 @@ enum NeoCallDemo {
             (false, "SXS 123 is on time, boarding at 18:40 from gate 207. The details are on your screen too."),
         ]
         for (index, turn) in turns.enumerated() { link.line(index + 1, person: turn.0, turn.1) }
-        link.line(9, person: true, "Great, and remind me to", final: false)
+        // `captions`: the bot is mid-sentence, nobody else talks.
+        if mode != "captions" { link.line(9, person: true, "Great, and remind me to", final: false) }
         link.card(1, "Your calendar this afternoon", "- 10:00 Stand-up\n- ~~14:00~~ **16:00** Salesforce review (moved)\n- 18:40 Boarding SXS 123")
         link.card(2, "Today's weather in Antalya", "Sunny, **24 °C**. Wind 12 km/h from the south-west. Sea 22 °C.")
         link.card(3, "Flight SXS 123", "**On time.** Boarding 18:40, gate 207.\nAntalya (AYT) → Frankfurt (FRA), 19:20 → 21:35.")
