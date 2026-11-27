@@ -14,6 +14,12 @@ final class WatchPhoneRelay: NSObject, WCSessionDelegate {
         WCSession.default.activate()
     }
 
+    func forgetGateway(_ id: UUID) {
+        requests.forgetGateway(id)
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
+        try? WCSession.default.updateApplicationContext(["requestsRevision": UUID().uuidString])
+    }
+
     nonisolated func session(
         _ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: (any Error)?
     ) {}

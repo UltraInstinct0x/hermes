@@ -65,6 +65,30 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
     }
 }
 
+public struct LedgerRouteCache<Route> {
+    private var entries: [LedgerRow.ID: (gateway: UUID, route: Route)] = [:]
+    private var removedGateways: Set<UUID> = []
+
+    public init() {}
+
+    public subscript(id: LedgerRow.ID) -> Route? { entries[id]?.route }
+
+    public func gateway(for id: LedgerRow.ID) -> UUID? { entries[id]?.gateway }
+
+    public mutating func set(_ route: Route, for id: LedgerRow.ID, gateway: UUID) {
+        entries[id] = (gateway, route)
+    }
+
+    public mutating func replace(with refreshed: Self) {
+        entries = refreshed.entries.filter { !removedGateways.contains($0.value.gateway) }
+    }
+
+    public mutating func remove(gateway: UUID) {
+        removedGateways.insert(gateway)
+        entries = entries.filter { $0.value.gateway != gateway }
+    }
+}
+
 public struct LedgerSource: Decodable, Sendable, Equatable, Identifiable {
     public enum State: String, Decodable, Sendable {
         case live, unsupported, offline, notAuthorized = "not_authorized", error

@@ -41,6 +41,7 @@ public enum WatchCompanion {
         public struct ID: Hashable, Codable, Sendable {
             public let row: LedgerRow.ID?
             public let requestID: String
+            public let gateway: UUID?
             let sessionID: String?
             let profile: String
         }
@@ -71,16 +72,16 @@ public enum WatchCompanion {
         public let expiresAt: TimeInterval?
 
         public init(requestID: String, source: String, content: Content, expiresAt: TimeInterval? = nil) {
-            id = ID(row: nil, requestID: requestID, sessionID: nil, profile: "")
+            id = ID(row: nil, requestID: requestID, gateway: nil, sessionID: nil, profile: "")
             self.source = source
             self.content = content
             self.expiresAt = expiresAt
         }
 
-        public init?(row: LedgerRow, snapshot: JSONValue, source: String, now: Date = .now) {
+        public init?(row: LedgerRow, snapshot: JSONValue, gateway: UUID? = nil, source: String, now: Date = .now) {
             guard row.state == "open", let sessionID = row.sessionID, !sessionID.isEmpty,
                   let request = row.openRequest(in: snapshot) else { return nil }
-            id = Self.identity(of: row)
+            id = Self.identity(of: row, gateway: gateway)
             self.source = source
             expiresAt = request.params["expires_at"]?.doubleValue ?? row.expiresAt
             if Self.isExpired(at: now, expiresAt: expiresAt) { return nil }
@@ -112,8 +113,8 @@ public enum WatchCompanion {
             }
         }
 
-        public static func identity(of row: LedgerRow) -> ID {
-            ID(row: row.id, requestID: row.requestID, sessionID: row.sessionID, profile: row.profileID ?? row.profile)
+        public static func identity(of row: LedgerRow, gateway: UUID? = nil) -> ID {
+            ID(row: row.id, requestID: row.requestID, gateway: gateway, sessionID: row.sessionID, profile: row.profileID ?? row.profile)
         }
 
         public func isExpired(at now: Date = .now) -> Bool {

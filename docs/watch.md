@@ -52,3 +52,5 @@ the iPhone wrote the reply, not that the gateway confirmed it won. **Back to Req
 to a refreshed list. If someone else answered, the request changed, or it expired, the Watch
 tells you it is no longer pending. If the phone can't confirm the send, refresh Requests before
 trying again. Existing notifications and their actions are unchanged.
+Removing a gateway on the iPhone invalidates its Watch requests and refreshes the list when the
+Watch receives the change.

@@ -17,6 +17,7 @@ struct HermesWatchApp: App {
 @Observable
 final class WatchLink: NSObject, WCSessionDelegate {
     private(set) var reachable = false
+    private(set) var requestsRevision: String?
 
     func activate() {
         guard WCSession.isSupported() else { return }
@@ -35,8 +36,17 @@ final class WatchLink: NSObject, WCSessionDelegate {
         Task { @MainActor [weak self] in self?.updateReachability() }
     }
 
+    nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+        guard let revision = applicationContext["requestsRevision"] as? String else { return }
+        Task { @MainActor [weak self] in self?.requestsRevision = revision }
+    }
+
     private func updateReachability() {
         reachable = WCSession.default.activationState == .activated && WCSession.default.isReachable
+        if WCSession.default.activationState == .activated,
+           let revision = WCSession.default.receivedApplicationContext["requestsRevision"] as? String {
+            requestsRevision = revision
+        }
     }
 
     func send(_ request: WatchCompanion.Request) async -> WatchCompanion.Response? {
@@ -220,7 +230,8 @@ private struct WatchRequestList: View {
             }
         }
         .navigationTitle("Requests")
-        .task(id: ReadTrigger(reachable: phone.reachable, active: phase == .active, retry: retry)) {
+        .task(id: ReadTrigger(reachable: phone.reachable, active: phase == .active, retry: retry,
+                              requestsRevision: phone.requestsRevision)) {
             guard phase == .active else { return }
             let result = await phone.send(.openRequests)
             if !Task.isCancelled { response = result ?? .unavailable }
@@ -404,4 +415,5 @@ private struct ReadTrigger: Equatable {
     let reachable: Bool
     let active: Bool
     let retry: Int
+    var requestsRevision: String? = nil
 }
