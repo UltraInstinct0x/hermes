@@ -198,8 +198,8 @@ private struct RequestActionContent: View {
     private func button(for action: RequestActivityPresentation.Action) -> some View {
         switch action {
         case .approve, .deny, .choice:
-            if let reference = RequestReference(presentation.state) {
-                Button(intent: NeoAnswerRequestIntent(reference: reference, shown: shown, action: action)) {
+            if let reference = RequestReference(presentation.state), let text = presentation.textToVerify(for: action) {
+                Button(intent: NeoAnswerRequestIntent(reference: reference, shown: text, action: action)) {
                     label(for: action, symbol: action == .approve ? "checkmark" : action == .deny ? "xmark" : nil)
                 }
                 .buttonStyle(.bordered)

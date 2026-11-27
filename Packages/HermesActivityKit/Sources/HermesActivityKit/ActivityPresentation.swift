@@ -129,6 +129,14 @@ public struct RequestActivityPresentation: Equatable, Sendable {
 
     // MARK: buttons
 
+    public func textToVerify(for action: Action) -> String? {
+        switch action {
+        case .approve, .deny: state.command
+        case .choice: state.detail
+        case .openToAnswer, .typeAnAnswer: nil
+        }
+    }
+
     public func actions(lockScreenAnswersEnabled: Bool, isStale: Bool, now: Date = .now) -> [Action] {
         guard state.outcome == nil, state.style != .computerOnly else { return [] }
         guard lockScreenAnswersEnabled, !isStale,

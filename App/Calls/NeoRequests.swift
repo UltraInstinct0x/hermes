@@ -147,17 +147,16 @@ enum NeoNotificationRouting {
 extension NeoBox: NeoActivityButtonHandling {
     func answerActivity(reference: RequestReference, shown: String, action: RequestActivityPresentation.Action) async {
         let matching = Activity<RequestActivityAttributes>.activities.filter { RequestReference($0.content.state) == reference }
-        guard matching.count == 1, let activity = matching.first,
-              RequestActivityPresentation(activity.content.state)
-                .actions(lockScreenAnswersEnabled: NotificationCatalog.neoLockScreenAnswersEnabled,
-                         isStale: activity.activityState == .stale).contains(action) else { return }
+        guard matching.count == 1, let activity = matching.first else { return }
+        let presentation = RequestActivityPresentation(activity.content.state)
+        guard presentation.actions(lockScreenAnswersEnabled: NotificationCatalog.neoLockScreenAnswersEnabled,
+                                   isStale: activity.activityState == .stale).contains(action),
+              presentation.textToVerify(for: action) == shown else { return }
         let selection: RequestSelection
         switch action {
         case .approve, .deny:
-            guard activity.content.state.command == shown else { return }
             selection = .approval(allow: action == .approve)
         case .choice(_, let label):
-            guard activity.content.state.detail == shown else { return }
             selection = .clarification(label, questionId: reference.isFrame ? activity.content.state.questionId : nil)
         case .openToAnswer, .typeAnAnswer:
             return

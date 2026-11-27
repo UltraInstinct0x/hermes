@@ -226,6 +226,15 @@ struct ActivityPresentationTests {
         #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.typeAnAnswer])
     }
 
+    @Test func questionIntentVerifiesTheOriginalTextRatherThanTheDisplayCopy() {
+        var state = question()
+        state.detail = "Which\n  region?"
+        let presentation = RequestActivityPresentation(state)
+        #expect(presentation.body == "Which region?")
+        #expect(presentation.textToVerify(for: .choice(index: 0, label: "eu")) == "Which\n  region?")
+        #expect(presentation.textToVerify(for: .typeAnAnswer) == nil)
+    }
+
     @Test func aCardLinkRoundTripsTheWholeReference() throws {
         let ref = try #require(RequestReference(botKey: "oracle::hermes", requestId: "native-id", sessionId: "session-1", executionGeneration: 0))
         let link = ActivityLink.request(ref)
