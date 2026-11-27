@@ -29,7 +29,7 @@ import time
 B = None  # backend.py globals
 LOCK = threading.RLock()
 SHA = re.compile(r"^[0-9a-fA-F]{40}$")
-PUBLISHED = "d92185448edd9939de2d1421d3280d393244630c"
+PUBLISHED = "a5dd92ff0e743671bf917732dcde221e444f43a1"
 
 # The pinned push plugin's hooks (AppPlugin.push), the same since 1.4.7.
 PUSH_HOOKS = ["pre_llm_call", "post_llm_call", "on_session_end", "pre_tool_call", "pre_approval_request",
@@ -37,7 +37,7 @@ PUSH_HOOKS = ["pre_llm_call", "post_llm_call", "on_session_end", "pre_tool_call"
               "kanban_task_completed", "kanban_task_blocked", "on_session_delete"]
 APPS = {
     "hermes-app-push": {
-        "repo": "vburojevic/hermes-app-push", "version": "1.4.9", "published": PUBLISHED,
+        "repo": "UltraInstinct0x/hermes-app-push", "version": "1.4.10", "published": PUBLISHED,
         # What Hermes says it switched on (hermes_cli/plugins_activation.py): hooks and the command at once.
         "activation": {"activated_now": {"hooks": PUSH_HOOKS, "gateway_commands": ["app-push"]}, "deferred": {}, "live_now": {}},
         "description": "Push notifications for the Hermes iPhone, iPad and Mac app: approvals, questions, password "
@@ -93,7 +93,7 @@ def seed(mode="current"):
 
 def app_for(repo):
     repo = (repo or "").strip().lower().removesuffix(".git").removeprefix("https://github.com/").removeprefix("git@github.com:")
-    return next((name for name, app in APPS.items() if app["repo"] == repo), None)
+    return next((name for name, app in APPS.items() if app["repo"].lower() == repo), None)
 
 
 def row(name, entry):

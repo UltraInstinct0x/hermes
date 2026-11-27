@@ -194,7 +194,7 @@ inside your Hermes; their source is in [`Tools/`](Tools/).
 
 | Plugin | What it adds |
 |---|---|
-| [hermes-app-push](https://github.com/vburojevic/hermes-app-push) | Notifications on iPhone and iPad, end-to-end encrypted; answers from the Lock Screen; Live Activities; scheduled tasks delivered to the app |
+| [hermes-app-push](https://github.com/UltraInstinct0x/hermes-app-push) | Notifications on iPhone and iPad, end-to-end encrypted; answers from the Lock Screen; Live Activities; scheduled tasks delivered to the app |
 | [hermes-app-widgets](https://github.com/vburojevic/hermes-app-widgets) | Widgets in replies: approvals, forms, checklists, results. Other chat platforms get plain text. |
 
 Everything else works without them. The app installs them only after you say yes, pinned to the

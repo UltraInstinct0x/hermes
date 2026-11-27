@@ -211,7 +211,7 @@ final class SetupCenter {
                 fallback: String(localized: "Hermes reaches you while the app is open."),
                 fix: SetupFix(title: String(localized: "Set Up…")),
                 steps: [
-                    SetupStep(String(localized: "Or on \(gateway):"), command: "hermes plugins install vburojevic/hermes-app-push --enable"),
+                    SetupStep(String(localized: "Or on \(gateway):"), command: "hermes plugins install \(AppPlugin.push.repo) --enable"),
                     .restartGateway,
                 ],
                 docs: docs

@@ -20,7 +20,7 @@ without a real Hermes or a paid model.
 | `Push/` | The app's push layer (`App/`), the Notification Service and Content extensions, the widget and Live Activity. |
 | `Relay/` | The push relay (Convex + Vercel). It routes sealed notices to APNs and never sees content. |
 | `Tools/mock-hermes/` | Mock gateway (`server.py`) and mock backend (`backend.py`) with scripted scenarios. |
-| `Tools/hermes-app-push/` | The Hermes Agent plugin that sends notices to the relay. Published to `vburojevic/hermes-app-push` with `Scripts/publish-push-plugin.sh`. |
+| `Tools/hermes-app-push/` | The Hermes Agent plugin that sends notices to the relay. Published to `UltraInstinct0x/hermes-app-push` with `Scripts/publish-push-plugin.sh`. |
 | `Tools/hermes-app-widgets/` | The Hermes Agent plugin for widgets agents send to the app: the `widget` tool, its checks and store, and plain text on other platforms. Published to `vburojevic/hermes-app-widgets` with `Scripts/publish-widgets-plugin.sh`. |
 | `Tools/IconGen/` | Renders the app icons from the same path the UI draws. |
 | `Scripts/release.sh` | The maintainers' release (TestFlight, including the public beta, + notarized Mac DMG). Needs the studio's signing escrow; never run it unless asked. |

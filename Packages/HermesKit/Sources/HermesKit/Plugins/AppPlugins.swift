@@ -92,7 +92,7 @@ public struct AppPlugin: Sendable, Hashable, Identifiable {
         return pinned.widens(older) ? pinned.additions(since: older) : nil
     }
 
-    /// "github.com/vburojevic/hermes-app-push".
+    /// The GitHub source displayed in plugin review.
     public var source: String { "github.com/\(repo)" }
 
     /// Where this plugin stands in one profile, from that profile's `plugins.manage list`.

@@ -45,7 +45,9 @@ extension AppPlugin {
         public init() {}
     }
 
-    /// Push notifications (`Tools/hermes-app-push`, `docs/notifications.md`). 1.4.9 runs on a Windows
+    /// Push notifications (`Tools/hermes-app-push`, `docs/notifications.md`). 1.4.10 ships from
+    /// the Neo repository, carries ledger routing for approvals and questions when Hermes supplies it,
+    /// and leaves sudo prompts out of notices, with the same access. 1.4.9 runs on a Windows
     /// gateway host (its lock, state file and process checks), same access. 1.4.8 counts only requests
     /// the person can still answer (none whose process a restart ended, past its deadline or, without
     /// one, six hours old) and closes a question or approval when its turn ends, same access. 1.4.7 counts a chat Hermes
@@ -66,13 +68,13 @@ extension AppPlugin {
     /// same access; 1.3.0 answers `/app-push host` (how the gateway's Mac schedules Hermes,
     /// Settings → Setup → Priority); 1.2.1 sent no notice for a turn that ends in "[SILENT]".
     public static let push = AppPlugin(
-        name: "hermes-app-push", repo: "vburojevic/hermes-app-push",
-        ref: "d92185448edd9939de2d1421d3280d393244630c", version: "1.4.9", minimumVersion: "1.4.9",
+        name: "hermes-app-push", repo: "UltraInstinct0x/hermes-app-push",
+        ref: "a5dd92ff0e743671bf917732dcde221e444f43a1", version: "1.4.10", minimumVersion: "1.4.10",
         capabilities: ["1.0.0": pushAccess, "1.1.0": pushAccess, "1.2.0": pushAccess, "1.2.1": pushAccess, "1.3.0": pushAccess,
                        "1.3.1": pushAccess, "1.3.2": pushAccess, "1.4.0": pushAccess, "1.4.1": pushAccess, "1.4.2": pushAccess,
                        "1.4.3": pushAccess, "1.4.4": pushAccess, "1.4.5": pushAccess, "1.4.6": pushAccess,
                        "1.4.7": pushCapabilities(since147: true), "1.4.8": pushCapabilities(since147: true),
-                       "1.4.9": pushCapabilities(since147: true)],
+                       "1.4.9": pushCapabilities(since147: true), "1.4.10": pushCapabilities(since147: true)],
         moments: [.ask, .notificationsPrime],
         words: pushWords
     )
