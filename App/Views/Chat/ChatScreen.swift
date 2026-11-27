@@ -246,6 +246,8 @@ struct ChatScreen: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             if let call = TalkCenter.shared.display, !TalkCenter.shared.isExpanded {
                 CallPill(session: call)
+                    .onAppear { TalkCenter.shared.chatPills += 1 }
+                    .onDisappear { TalkCenter.shared.chatPills -= 1 }
                     .padding(.horizontal, 10)
                     .padding(.bottom, 6)
                     .transition(.move(edge: .top).combined(with: .opacity))

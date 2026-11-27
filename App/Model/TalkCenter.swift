@@ -28,6 +28,9 @@ final class TalkCenter {
 
     /// Type: the call's composer takes the cursor (`ChatScreen` follows this).
     var typeRequests = 0
+    /// Hermes Neo: call pills a chat shows now; with none, the app's root shows the pill (`App/Calls`), so a
+    /// minimised call is visible on every screen.
+    var chatPills = 0
 
     /// A call asked for from outside the app (a Shortcut, the control, Hey Hermes) that can't start
     /// yet (`docs/voice.md` §4.4): it shows as waiting, ends by itself after a minute, and says why
