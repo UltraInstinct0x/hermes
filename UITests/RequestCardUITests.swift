@@ -12,6 +12,20 @@ final class RequestCardUITests: XCTestCase {
     }
 
     @MainActor
+    func testOpeningARequestLinkDismissesSettingsAndShowsNeedsYou() async throws {
+        let app = try await launch(["-HERMES_OPEN", "settings"])
+        let settings = app.navigationBars["Settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+
+        app.open(try XCTUnwrap(URL(string: "hermesneo://requests")))
+
+        XCTAssertTrue(settings.waitForNonExistence(timeout: 10))
+        let filter = app.buttons["inbox.filter"].firstMatch
+        XCTAssertTrue(filter.waitForExistence(timeout: 10))
+        XCTAssertTrue((filter.value as? String)?.contains("Needs You") == true)
+    }
+
+    @MainActor
     func testNeedsYouAcrossChatsBeforeAnswering() async throws {
         _ = try await seedNeedsYouApprovals()
         for appearance in ["light", "dark"] {

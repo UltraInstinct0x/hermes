@@ -214,7 +214,13 @@ struct RootView: View {
         .onOpenURL { url in
             #if os(iOS)
             if let link = ActivityLink(url: url) {
-                NeoBox.shared.openRequestLink(link, window: router.windowID)
+                let window = router.windowID
+                if router.sheet != nil {
+                    router.afterDismiss = { NeoBox.shared.openRequestLink(link, window: window) }
+                    router.sheet = nil
+                } else {
+                    NeoBox.shared.openRequestLink(link, window: window)
+                }
                 return
             }
             #endif
