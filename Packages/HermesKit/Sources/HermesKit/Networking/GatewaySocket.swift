@@ -42,12 +42,14 @@ public struct GatewayEvent: Sendable, Equatable {
     public var sessionID: String
     public var seq: Int?
     public var payload: JSONValue
+    public var executionGeneration: Int?
 
-    public init(type: String, sessionID: String, seq: Int?, payload: JSONValue) {
+    public init(type: String, sessionID: String, seq: Int?, payload: JSONValue, executionGeneration: Int? = nil) {
         self.type = type
         self.sessionID = sessionID
         self.seq = seq
         self.payload = payload
+        self.executionGeneration = executionGeneration
     }
 
     init(params: JSONValue) {
@@ -55,6 +57,7 @@ public struct GatewayEvent: Sendable, Equatable {
         sessionID = params["session_id"]?.stringValue ?? ""
         seq = params["seq"]?.truncatedIntValue
         payload = params["payload"] ?? .object([:])
+        executionGeneration = (params["execution_generation"] ?? payload["execution_generation"])?.truncatedIntValue
     }
 }
 
@@ -151,6 +154,7 @@ public actor GatewaySocket {
     public enum Failure: Error, LocalizedError, Equatable {
         case notConnected
         case handshakeTimedOut
+        case missingExecutionGeneration
         case closed(String)
         case timedOut(method: String)
 
@@ -158,10 +162,16 @@ public actor GatewaySocket {
             switch self {
             case .notConnected: "Not connected to the Hermes backend."
             case .handshakeTimedOut: "The Hermes backend didn't answer. Check the address and that `hermes serve` is running."
+            case .missingExecutionGeneration: "Hermes hasn't identified the running turn yet."
             case .closed(let reason): reason
             case .timedOut(let method): "Hermes didn't answer \(method) in time."
             }
         }
+    }
+
+    public nonisolated static func failureLogFields(_ error: any Error) -> (domain: String, code: Int) {
+        let failure = error as NSError
+        return (failure.domain, (error as? GatewayRPCError)?.code ?? failure.code)
     }
 
     private let url: URL
@@ -190,6 +200,19 @@ public actor GatewaySocket {
     /// `session_authority`, Hermes Agent 0.23.3 and newer), whose parameter rules differ from the
     /// legacy dispatcher's (`PromptSubmitContract`). Read once per socket: a reconnect is a new one.
     public private(set) var sessionAuthority = false
+
+    /// Returns whether this was an authority Stop (a fenced interrupt, not a queue purge).
+    public func interrupt(sessionID: String, profile: String?, generation: Int?) async throws -> Bool {
+        let authority = sessionAuthority
+        var params: [String: JSONValue] = ["session_id": .string(sessionID)]
+        if authority {
+            guard let generation else { throw Failure.missingExecutionGeneration }
+            params["execution_generation"] = .number(Double(generation))
+            if let profile { params["profile"] = .string(profile) }
+        }
+        _ = try await request("session.interrupt", params)
+        return authority
+    }
     /// The Bot Chat each profile's commands run in on a session authority, by profile name ("" for
     /// the gateway's own). Kept per socket, which is per backend process.
     private var commandSessions: [String: Task<String, any Error>] = [:]

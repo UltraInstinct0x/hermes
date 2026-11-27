@@ -243,7 +243,9 @@ def file_attach(params):
     # Like `tui_gateway` `file.attach`: 4015 without bytes, 5028 with the reason for a payload it
     # can't decode (`_stage_session_file_attachment`). A name with "refuseupload" is refused as a
     # full disk would be, and one with "toolarge" as a file over Hermes's 256 MB cap.
-    B["runtime_for"](params)
+    _, runtime = B["runtime_for"](params)
+    with B["LOCK"]:
+        B["check_authority_scope"](params, runtime)
     name = params.get("name") or "file"
     data_url = str(params.get("data_url") or "").strip()
     if not data_url and not params.get("path"):

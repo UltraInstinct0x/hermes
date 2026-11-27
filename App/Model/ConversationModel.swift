@@ -602,6 +602,7 @@ final class ConversationModel: Identifiable {
     /// Settling only counts once Hermes has taken our prompt (creating a chat settles too, and so
     /// does building its agent: `TurnSettleGate`).
     @ObservationIgnored private var turnGate = TurnSettleGate()
+    @ObservationIgnored private var gatewayExecution: (turnID: String, generation: Int)?
     /// A turn the backend started on its own (a routine, another device, a Bot's message).
     @ObservationIgnored private var isRemoteTurn = false
     @ObservationIgnored private var seenActivity: Date?
@@ -3238,13 +3239,23 @@ final class ConversationModel: Identifiable {
             var sent = false
             do {
                 let runtime = try await ensureRuntime()
+                guard try await roster.allowsPromptPhotos(item.images.count) else {
+                    expectedFromGateway.removeAll { $0.text == item.line }
+                    var held = item
+                    held.isHeld = true
+                    animateRows {
+                        gatewayHeld.release(item.line)
+                        queue.append(held)
+                    }
+                    banner = Self.promptPhotoLimitError
+                    return
+                }
                 stagedOn = runtime
                 for (index, image) in item.images.enumerated() {
-                    staged.staged(try await roster.request("image.attach_bytes", [
-                        "session_id": .string(runtime),
+                    staged.staged(try await roster.request("image.attach_bytes", mediaParams(runtime: runtime, [
                         "content_base64": .string(image.jpegData.base64EncodedString()),
                         "filename": .string("image-\(index + 1).jpg"),
-                    ]))
+                    ])))
                 }
                 if !item.images.isEmpty, let key = stableKey {
                     workspace?.imageStore.remember(item.images, conversation: key, text: item.text)
@@ -3258,7 +3269,8 @@ final class ConversationModel: Identifiable {
                 sent = true
                 // Its own id, so Hermes knows it again if it already has it; a stale session is
                 // resumed and the message sent again, once.
-                let submit = PromptSubmitContract(sessionID: runtime, text: prompt, queued: true, submissionID: item.id.uuidString)
+                let submit = PromptSubmitContract(sessionID: runtime, text: prompt, queued: true,
+                                                  submissionID: item.id.uuidString, profile: gatewayProfile, images: staged)
                 let result = try await PromptSubmitContract.submittingOnce(submit) { submit in
                     try await roster.submitPrompt(submit)
                 } resume: {
@@ -3293,8 +3305,19 @@ final class ConversationModel: Identifiable {
     /// for whichever prompt comes next.
     private func takeBack(_ staged: StagedImages, runtime: String, roster: BotRoster) async {
         for path in staged.paths {
-            _ = try? await roster.request("image.detach", ["session_id": .string(runtime), "path": .string(path)])
+            _ = try? await roster.request("image.detach", mediaParams(runtime: runtime, ["path": .string(path)]))
         }
+    }
+
+    private func mediaParams(runtime: String, _ fields: [String: JSONValue]) -> [String: JSONValue] {
+        var params = fields
+        params["session_id"] = .string(runtime)
+        if let gatewayProfile { params["profile"] = .string(gatewayProfile) }
+        return params
+    }
+
+    private static var promptPhotoLimitError: HermesError {
+        .invalidResponse(String(localized: "Send up to \(PromptSubmitContract.authorityPhotoLimit) photos per message. Remove some photos and try again."))
     }
 
     /// A message the gateway holds: shown in the tray until its turn starts. `item` is the whole
@@ -5145,9 +5168,12 @@ extension ConversationModel {
                 recoverStoredMidTurn()
             }
             if let inflight { adopt(inflight) }
-            // What Hermes holds for the next turn (`queued`): in the tray, read-only.
-            // Hermes shows only the first it holds: what this device sent stays, whole (`GatewayHeldQueue`).
-            let head = GatewayQueue.queuedPrompt(in: snapshot)
+            if running, let turnID = live?.turn.id, gatewayExecution?.turnID != turnID,
+               let generation = snapshot["execution_generation"]?.truncatedIntValue {
+                gatewayExecution = (turnID, generation)
+            }
+            // What Hermes holds for the next turn: the tray keeps this device's whole messages.
+            let head = GatewayQueue.queuedPrompt(in: snapshot).map { $0.isEmpty ? String(localized: "Photo") : $0 }
             let heldNone = gatewayHeld.isEmpty
             let dropped = gatewayHeld.attached(head: head)
             if let head, heldNone {
@@ -5259,6 +5285,11 @@ extension ConversationModel {
                 }
                 guard await roster.untilConnected() else { throw CancellationError() }
                 var runtime = try await ensureRuntime()
+                guard try await roster.allowsPromptPhotos(images.count) else {
+                    isBotTurnOpen = false
+                    restoreDraft(text: text, images: images, files: files, error: Self.promptPhotoLimitError)
+                    return
+                }
                 if isBotChat, ["/new", "/reset", "/compact", "/compress"].contains(command) {
                     endDelivery()
                     try await compactBotChat(runtime: runtime, wasReset: command == "/new" || command == "/reset")
@@ -5279,11 +5310,10 @@ extension ConversationModel {
                     do {
                         stagedOn = runtime
                         for (index, image) in images.enumerated() {
-                            staged.staged(try await roster.request("image.attach_bytes", [
-                                "session_id": .string(runtime),
+                            staged.staged(try await roster.request("image.attach_bytes", mediaParams(runtime: runtime, [
                                 "content_base64": .string(image.jpegData.base64EncodedString()),
                                 "filename": .string("image-\(index + 1).jpg"),
-                            ]))
+                            ])))
                         }
                         references = []
                         for file in files {
@@ -5344,7 +5374,8 @@ extension ConversationModel {
                 // seen yet (a process's notice, a held message Hermes sends as a turn ends, another
                 // device's): with `queued` a busy chat queues it, and the answer says so.
                 let submit = PromptSubmitContract(sessionID: runtime, text: prompt, queued: true,
-                                                  extras: turnVoice?.submitParams ?? [:], submissionID: messageID.uuidString)
+                                                  extras: turnVoice?.submitParams ?? [:], submissionID: messageID.uuidString,
+                                                  profile: gatewayProfile, images: staged)
                 // Patient: on an open socket the answer comes when a frozen backend wakes; a socket that
                 // dies fails it at once. One that goes quiet never answers, so the stored chat is read
                 // meanwhile (`submitWatched`), counted from here.
@@ -5595,11 +5626,10 @@ extension ConversationModel {
         }
         if file.isPDF {
             do {
-                let result = try await roster.request("pdf.attach", [
-                    "session_id": .string(runtime),
+                let result = try await roster.request("pdf.attach", mediaParams(runtime: runtime, [
                     "content_base64": .string(file.data.base64EncodedString()),
                     "filename": .string(file.name),
-                ], timeout: .seconds(120))
+                ]), timeout: .seconds(120))
                 if result["attached"]?.boolValue != false {
                     staged.staged(result) // its pages go as photos
                     return AttachedFiles.pdfNote(name: file.name)
@@ -5613,11 +5643,12 @@ extension ConversationModel {
         }
         let result: JSONValue
         do {
-            result = try await roster.request("file.attach", [
-                "session_id": .string(runtime),
+            result = try await roster.request("file.attach", mediaParams(runtime: runtime, [
                 "data_url": .string(file.dataURL),
                 "name": .string(file.name),
-            ], timeout: .seconds(120))
+            ]), timeout: .seconds(120))
+        } catch where PromptSubmitContract.isStaleSession(error) {
+            throw error
         } catch {
             // Hermes's own words are an exception's text ("[Errno 28] …"): say it plainly, with the
             // file's name (`docs/composer.md` §2). Anything else is the send's to handle.
@@ -6012,6 +6043,9 @@ extension ConversationModel {
         }
         connectionNote = nil
         if Self.turnEvents.contains(event.type) || event.type == "message.complete" {
+            if let turnID = live?.turn.id, let generation = event.executionGeneration {
+                gatewayExecution = (turnID, generation)
+            }
             turnGate.take()
             endDelivery()
         }
@@ -6702,39 +6736,59 @@ extension ConversationModel {
     #endif
 
     private func stopBotTurn() {
-        guard let roster = gatewayRoster, let runtime = runtimeSessionID, turnGate.sent else {
+        guard let roster = gatewayRoster, let runtime = runtimeSessionID, turnGate.sent, let turnID = live?.turn.id else {
             turnTask?.cancel()
             return
         }
-        let turnID = live?.turn.id
         let baseline = turnBaseline?.newest
         // Hermes ends more than the turn: the chat's helpers and the approval it waited on.
         let helpersRunning = helpers.teams.reduce(0) { $0 + $1.runningCount + $1.waitingCount }
         let approvalWaiting = live?.approval != nil
         Task {
+            let authority: Bool
             do {
-                _ = try await roster.request("session.interrupt", ["session_id": .string(runtime)])
-                // Hermes empties its queue with the turn: nothing it held for the next one runs.
-                giveBackClearedByStop(baseline: baseline)
-                if let line = StopReceipt.line(helpersStopped: helpersRunning, approvalDeclined: approvalWaiting) {
-                    addReceipt(line, symbol: "stop.circle")
+                authority = try await roster.interruptPrompt(sessionID: runtime, profile: gatewayProfile) {
+                    try await stopGeneration(for: turnID, runtime: runtime)
                 }
-            } catch where !(error is GatewayRPCError) {
-                // The stop never got there, or its answer was lost: the turn may still be running,
-                // so it isn't shown as stopped (its events, or the next attach, say how it ends).
-                ConnectionLog.logger.notice("chat: a stop wasn't answered (\(BotRoster.describe(error), privacy: .public))")
-                if self.live?.turn.id == turnID { self.isStopping = false }
-                banner = .server(status: 0, code: nil, message: String(localized: "Couldn't reach \(gatewayName) to stop this. It may still be running."))
+                if !authority {
+                    giveBackClearedByStop(baseline: baseline)
+                    if let line = StopReceipt.line(helpersStopped: helpersRunning, approvalDeclined: approvalWaiting) {
+                        addReceipt(line, symbol: "stop.circle")
+                    }
+                }
+            } catch is CancellationError {
                 return
             } catch {
-                // Hermes answered with a refusal: the chat has nothing running to stop.
+                let failure = GatewaySocket.failureLogFields(error)
+                ConnectionLog.logger.notice("chat: a stop wasn't confirmed (\(failure.domain, privacy: .public) \(failure.code, privacy: .public))")
+                guard live?.turn.id == turnID, isWorking else { return }
+                isStopping = false
+                banner = .server(status: 0, code: nil, message: String(localized: "Couldn't confirm Stop on \(gatewayName). It may still be running."))
+                return
             }
             try? await Task.sleep(for: .seconds(12))
             if self.live?.turn.id == turnID, self.isWorking {
-                self.live?.markStopped()
-                self.settle()
+                if authority {
+                    self.isStopping = false
+                } else {
+                    self.live?.markStopped()
+                    self.settle()
+                }
             }
         }
+    }
+
+    private func stopGeneration(for turnID: String, runtime: String) async throws -> Int {
+        let deadline = ContinuousClock.now + .seconds(5)
+        repeat {
+            guard live?.turn.id == turnID, live?.isFinished == false, runtimeSessionID == runtime else {
+                if live?.turn.id == turnID { isStopping = false }
+                throw CancellationError()
+            }
+            if let gatewayExecution, gatewayExecution.turnID == turnID { return gatewayExecution.generation }
+            try await Task.sleep(for: .milliseconds(100))
+        } while ContinuousClock.now < deadline
+        throw GatewaySocket.Failure.missingExecutionGeneration
     }
 
     /// Stop emptied Hermes's queue (`session.interrupt`): what the tray showed comes back to the top

@@ -43,6 +43,25 @@ struct PromptSubmitContractTests {
         }
     }
 
+    @Test func authorityUsesTheUploadReferencesAndProfileWithoutChangingLegacyParams() {
+        var images = StagedImages()
+        images.staged(.object(["path": .string("/staged/photo.jpg"), "mime": .string("image/jpeg"), "count": .number(1)]))
+        let message = PromptSubmitContract(sessionID: "rt-1", text: "Look", profile: "writer", images: images)
+        let authority = message.params(sessionAuthority: true)
+        #expect(authority["profile"] == .string("writer"))
+        #expect(authority["attachments"] == .array([.object(["path": .string("/staged/photo.jpg"), "mime": .string("image/jpeg")])]))
+        #expect(images.paths == ["/staged/photo.jpg"])
+        let legacy = message.params(sessionAuthority: false)
+        #expect(legacy["profile"] == nil)
+        #expect(legacy["attachments"] == nil)
+    }
+
+    @Test func onlyAuthorityPromptsRejectMoreThanTenPhotos() {
+        #expect(PromptSubmitContract.allowsPhotoCount(10, sessionAuthority: true))
+        #expect(!PromptSubmitContract.allowsPhotoCount(11, sessionAuthority: true))
+        #expect(PromptSubmitContract.allowsPhotoCount(11, sessionAuthority: false))
+    }
+
     @Test func eachMessageMintsItsOwnID() {
         let first = PromptSubmitContract(sessionID: "rt-1", text: "Hi")
         let second = PromptSubmitContract(sessionID: "rt-1", text: "Hi")

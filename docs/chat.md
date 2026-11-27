@@ -1114,15 +1114,17 @@ message is always in one of these states:
 
 Nothing is sent twice. Up Next keeps its order: Send Again, Talk, Send as Message and Try Again wait
 behind a running turn, a held chat and what already waits (`UpNext.goesNow`), with their skills,
-mentions and attachments. Photos staged for a prompt Hermes refused, or one that never went, are
-taken back (`image.detach`, `StagedImages`), so they never ride on the next message. Hermes sends
+mentions and attachments. On a legacy socket, photos staged for a prompt Hermes refused, or one
+that never went, are taken back (`image.detach`, `StagedImages`). On an authority socket, only
+the prompt that explicitly names the staged photos can take them. Hermes sends
 its queue one envelope per turn: words join a text-only head while nothing waits behind it, and a
 message with photos or files is always a turn of its own, so the tray lets go of only what each turn
-carries (`GatewayHeldQueue`). Stop empties Hermes's queue with the turn. Once the stopped turn
+carries (`GatewayHeldQueue`). Legacy Stop empties Hermes's queue with the turn. Once the stopped turn
 settled, what the tray held comes back to the top of Up Next, whole, held for a Send
 (`UpNextNote.clearedByStop`), except a message the stored chat shows ran after all (its turn started
-just before the Stop got there). A Stop that never got an answer says it couldn't reach the gateway
-and leaves the turn running. Hermes writes a row for each message as it takes it into its queue
+just before the Stop got there). Authority Stop interrupts only the named execution; its queue is
+unchanged. A refused or unanswered Stop leaves the turn running on screen until Hermes says how
+it ends. The legacy gateway writes a row for each message as it takes it into its queue
 (`display_metadata` `_queued_prompt`) and swaps it for the turn's own row when it runs; after a Stop
 the marked row stays until Hermes next mounts the chat, so the chat never shows a marked row as a
 message (`SessionMessage.isWaitingInQueue`). A message that falls back from Ask Aside or Run in Background with no

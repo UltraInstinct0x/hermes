@@ -99,7 +99,14 @@ struct BackendIntegrationTests {
         let runtime = try #require(resumed["session_id"]?.stringValue)
 
         let messages = await socket.messages()
-        _ = try await submit(PromptSubmitContract(sessionID: runtime, text: "What's new?", queued: false), on: socket)
+        let prompt = PromptSubmitContract(sessionID: runtime, text: "What's new?", queued: false, profile: "writer")
+        if await socket.sessionAuthority {
+            let unscoped = await #expect(throws: GatewayRPCError.self) {
+                try await submit(PromptSubmitContract(sessionID: runtime, text: prompt.text), on: socket)
+            }
+            #expect(unscoped?.refusalReason == "permission_denied")
+        }
+        _ = try await submit(prompt, on: socket)
         var live = LiveTurn(id: "t", sessionID: runtime)
         var settled = false
         for await message in messages {
@@ -114,6 +121,59 @@ struct BackendIntegrationTests {
         #expect(live.turn.answer.contains("Here's what I found"))
         #expect(!live.turn.reasoningText.isEmpty)
         #expect(live.turn.steps.contains { if case .tool(let tool) = $0 { tool.status == .succeeded && tool.callID != nil } else { false } })
+    }
+
+    @Test(.timeLimit(.minutes(1))) func authorityStopUsesTheLiveGenerationAndKeepsTheQueuedPhoto() async throws {
+        let (_, socket) = try await connect()
+        defer { Task { await socket.close() } }
+        guard await socket.sessionAuthority else { return }
+        let created = try await socket.request("session.create", ["profile": .string("writer"), "title": .string("Media scratch")])
+        let stored = try #require(created["stored_session_id"]?.stringValue)
+        let runtime = try #require(created["session_id"]?.stringValue)
+        let events = await socket.messages()
+        var iterator = events.makeAsyncIterator()
+        let upload = try await socket.request("image.attach_bytes", [
+            "session_id": .string(runtime), "profile": .string("writer"),
+            "filename": .string("photo.jpg"), "content_base64": .string("/9j/"),
+        ])
+        var images = StagedImages()
+        images.staged(upload)
+        let first = PromptSubmitContract(sessionID: runtime, text: "marathon without media", profile: "writer")
+        _ = try await submit(first, on: socket)
+        var liveGeneration: Int?
+        while let message = await iterator.next() {
+            guard case .frame(.event(let event)) = message, event.sessionID == runtime, event.type == "message.start" else { continue }
+            liveGeneration = event.executionGeneration
+            break
+        }
+        let generation = try #require(liveGeneration)
+        let second = PromptSubmitContract(sessionID: runtime, text: "queued media",
+                                          profile: "writer", images: images)
+        _ = try await submit(second, on: socket)
+        let resumed = try await socket.request("session.resume", ["session_id": .string(stored), "profile": .string("writer")])
+        #expect(resumed["queued"] == nil)
+        #expect(GatewayQueue.queuedPrompt(in: resumed) == "queued media")
+        let stale = await #expect(throws: GatewayRPCError.self) {
+            try await socket.interrupt(sessionID: runtime, profile: "writer", generation: generation - 1)
+        }
+        #expect(stale?.refusalReason == "stale_generation")
+        let stopped = try await socket.interrupt(sessionID: runtime, profile: "writer", generation: generation)
+        #expect(stopped)
+        var endings: [String] = []
+        while let message = await iterator.next() {
+            guard case .frame(.event(let event)) = message, event.sessionID == runtime,
+                  event.type == "message.complete", let status = event.payload["status"]?.stringValue else { continue }
+            endings.append(status)
+            if endings.count == 2 { break }
+        }
+        #expect(endings == ["interrupted", "complete"])
+        let snapshot = try await socket.request("session.resume", ["session_id": .string(stored), "profile": .string("writer")])
+        let rows = try #require(snapshot["messages"])
+        guard case .array(let messages) = rows else { Issue.record("No stored rows"); return }
+        let content = messages.compactMap { $0["content"]?.stringValue }
+        let path = try #require(upload["path"]?.stringValue)
+        #expect(content.contains { $0.contains("queued media") && $0.contains(path) })
+        #expect(content.contains("marathon without media"))
     }
 
     @Test func approvalsAreServerRequests() async throws {
