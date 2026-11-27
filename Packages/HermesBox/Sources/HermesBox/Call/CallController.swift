@@ -390,6 +390,14 @@ public final class CallController {
 
     public func toggleMute() { setMuted(!isMuted) }
 
+    /// Hermes Neo: a typed turn of the call (`call.say_text`): the bot answers it aloud, as if it was said.
+    public func say(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isInCall, !text.isEmpty else { return }
+        apply(session?.say(text) ?? [])
+        publish()
+    }
+
     public func setMuted(_ muted: Bool) {
         guard muted != isMuted else { return }
         isMuted = muted

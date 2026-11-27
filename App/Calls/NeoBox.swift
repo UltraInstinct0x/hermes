@@ -48,6 +48,8 @@ final class NeoBox {
     @ObservationIgnored private let callKit: NeoCallKitHost
     @ObservationIgnored private let rings: RingCoordinator
     @ObservationIgnored private var pushKit: NeoPushKitHost?
+    /// The box's call as one of the app's Talk calls (the pill, End, its card in the bot's chat).
+    @ObservationIgnored private var talk: NeoTalkCall?
 
     private init() {
         let http = URLSessionHTTPTransport()
@@ -83,6 +85,9 @@ final class NeoBox {
         pushKit = NeoPushKitHost(coordinator: rings, voip: voip)
         // The box refused the device token: drop it, so the next attempt pairs again on the gateway login.
         voip.onUnauthorized = { [weak self] in self?.forgetPairing() }
+        let talk = NeoTalkCall(calls: calls, box: self)
+        talk.start()
+        self.talk = talk
     }
 
     var isPaired: Bool { box != nil }
@@ -201,13 +206,32 @@ final class NeoBox {
     /// The calling bot's chat in the app, when a gateway's Bot Mode lists a bot of that profile: its waiting approval
     /// or question shows on the call screen. Nil when the app has no such bot (then nothing shows there).
     func waitingConversation(botKey: String?) -> ConversationModel? {
-        guard let botKey, let app else { return nil }
+        guard let botKey, let roster = roster(for: botKey) else { return nil }
+        return roster.conversation(for: BotKey(rawValue: botKey).profileId)
+    }
+
+    /// The Bot Mode of the app's gateway that has a bot of this box bot's profile name.
+    private func roster(for botKey: String) -> BotRoster? {
+        guard let app else { return nil }
         let profile = BotKey(rawValue: botKey).profileId
         for workspace in [app.currentWorkspace].compactMap({ $0 }) + app.bots.compactMap({ app.workspaces[$0.id] }) {
-            guard let roster = workspace.roster, roster.profiles.contains(where: { $0.name == profile }) else { continue }
-            return roster.conversation(for: profile)
+            if let roster = workspace.roster, roster.profiles.contains(where: { $0.name == profile }) { return roster }
         }
         return nil
+    }
+
+    /// The face the app draws for that bot (the call pill).
+    func appearance(botKey: String?) -> BotAppearance? {
+        guard let botKey, let roster = roster(for: botKey), let bot = roster.bot(named: BotKey(rawValue: botKey).profileId) else { return nil }
+        return roster.appearance(for: bot)
+    }
+
+    /// The bot's Bot Chat, where a call's card goes: the open one's, or the one the gateway names.
+    func botChatSessionID(botKey: String) async -> String? {
+        guard let roster = roster(for: botKey) else { return nil }
+        let profile = BotKey(rawValue: botKey).profileId
+        if let id = roster.conversation(for: profile).sessionID { return id }
+        return try? await roster.resolveBotChat(profile)
     }
 
     // MARK: calls from your bots
@@ -283,7 +307,7 @@ final class NeoRingCalls: RingCallHandling {
         self.controller = controller
     }
 
-    var isInCall: Bool { controller.isInCall || TalkCenter.shared.isActive }
+    var isInCall: Bool { controller.isInCall || TalkCenter.shared.session != nil }
 
     var onCallEnded: (@MainActor (String?) -> Void)? {
         get { controller.onCallEnded }

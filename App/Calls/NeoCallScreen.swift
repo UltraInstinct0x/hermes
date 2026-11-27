@@ -5,9 +5,10 @@ import SwiftUI
 
 /// The call: the bot's indicator, transcript or screen, mute, route, End. Hermes Bot's `CallScreen`
 /// (`ios/HermesBot/CallViews.swift`), ported as it was: the same layout, sizes, fonts and colours (`NeoCallTheme`).
-/// Neo's changes: the indicator is the bot's own avatar (`NeoCallOrbHost`), the transcript page uses upstream Talk's
-/// transcript flow in a larger size (`NeoCallTranscript`), a Chats button in the bottom row minimises the call to the
-/// app (the call bar), and a request the calling bot waits on is answered here with upstream's own card.
+/// Neo's changes: the indicator is the bot's own avatar (`NeoCallOrbHost`), the transcript page shows the call as
+/// the app's chat or as large captions (`NeoCallTranscript`, View), the buttons are upstream Talk's row (Mute, Audio,
+/// Type, View, End), minimising leaves upstream's call pill in the chat, and a request the calling bot waits on is
+/// answered here with upstream's own card.
 /// Views hold no logic: every action is one call into `CallController`, every sentence comes from `CallPresentation`.
 struct NeoCallScreen: View {
     let calls: CallController
@@ -15,6 +16,12 @@ struct NeoCallScreen: View {
     var waiting: ConversationModel?
 
     @State private var pane: CallContentPane = .transcript
+    /// View: the transcript page as the app's chat (`chat`) or as large captions (`captions`). Kept on this phone.
+    @AppStorage("neo.call.transcriptStyle") private var transcriptStyle = NeoCallTranscript.Style.chat.rawValue
+    /// Type: a field above the buttons whose words are a turn of the call.
+    @State private var isTyping = false
+    @State private var typed = ""
+    @FocusState private var typingFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The shared ending, once the call is over (any cause) and its summary is built.
@@ -57,7 +64,7 @@ struct NeoCallScreen: View {
     private var topBar: some View {
         HStack {
             Button {
-                calls.closeScreen()
+                minimize()
             } label: {
                 Image(systemName: "chevron.down").frame(width: NeoCallTheme.tapTarget, height: NeoCallTheme.tapTarget)
             }
@@ -70,6 +77,12 @@ struct NeoCallScreen: View {
         }
         .padding(.horizontal, 8)
         .foregroundStyle(NeoCallTheme.primaryText)
+    }
+
+    /// Back to the app while the call goes on: its pill at the top of the chat brings it back (`TalkCenter`).
+    private func minimize() {
+        calls.closeScreen()
+        if TalkCenter.shared.external != nil { TalkCenter.shared.isExpanded = false }
     }
 
     private var engineLabel: String {
@@ -141,7 +154,16 @@ struct NeoCallScreen: View {
     /// Two panes side by side, swiped like pages. The slide is the pager's own.
     private func paneContent(_ session: CallSession) -> some View {
         TabView(selection: $pane) {
-            NeoCallTranscript(lines: CallTranscriptLine.lines(session.captions, botName: calls.bot?.name ?? "Bot"))
+            NeoCallTranscript(
+                lines: CallTranscriptLine.lines(session.captions, botName: calls.bot?.name ?? "Bot"),
+                style: NeoCallTranscript.Style(rawValue: transcriptStyle) ?? .chat)
+                // The oldest line in view fades out under the indicator instead of being cut there.
+                .mask {
+                    VStack(spacing: 0) {
+                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 24)
+                        Color.black
+                    }
+                }
                 .tag(CallContentPane.transcript)
             NeoCallDisplayArea(items: calls.displayItems, onClear: { calls.clearDisplay() })
                 .tag(CallContentPane.screen)
@@ -221,58 +243,93 @@ struct NeoCallScreen: View {
 
     // MARK: controls
 
+    /// The call's buttons as upstream Talk draws them (`CallControls`: `CallButton`s on one glass bar, every one
+    /// labelled): Mute, Audio, Type, View, End. Type writes a turn of the call; View switches the transcript page
+    /// between the app's chat and large captions.
     @ViewBuilder
     private var controls: some View {
         if calls.isInCall {
-            HStack(spacing: 24) {
-                roundButton(
-                    title: CallPresentation.muteTitle(muted: calls.isMuted), image: calls.isMuted ? "mic.slash.fill" : "mic.fill",
-                    filled: calls.isMuted
-                ) { calls.toggleMute() }
-                routeButton
-                // Neo: back to the app while the call goes on (the call bar brings it back).
-                roundButton(title: "Chats", image: "bubble.left.and.bubble.right.fill", filled: false) { calls.closeScreen() }
-                    .accessibilityLabel("Hide the call")
-                    .accessibilityHint("Goes back to your chats and bots. The call keeps going")
-                roundButton(title: "End call", image: "phone.down.fill", filled: true, tint: NeoCallTheme.problem) { calls.end() }
+            VStack(spacing: 10) {
+                if isTyping { typeField }
+                HStack(spacing: 6) {
+                    CallButton(
+                        symbol: calls.isMuted ? "mic.slash.fill" : "mic.fill", label: calls.isMuted ? "Muted" : "Mute", isOn: calls.isMuted
+                    ) { calls.toggleMute() }
+                    .accessibilityLabel(calls.isMuted ? "Unmute" : "Mute")
+                    routeButton
+                    CallButton(symbol: "keyboard", label: "Type", isOn: isTyping) {
+                        isTyping.toggle()
+                        typingFocused = isTyping
+                    }
+                    .accessibilityHint("Type a turn of the call. The bot answers it aloud")
+                    CallButton(symbol: isCaptions ? "captions.bubble.fill" : "bubble.left.and.text.bubble.right", label: "View") {
+                        transcriptStyle = (isCaptions ? NeoCallTranscript.Style.chat : .captions).rawValue
+                        pane = .transcript
+                    }
+                    .accessibilityValue(isCaptions ? Text("Captions") : Text("Chat"))
+                    .accessibilityHint("Shows the call as the chat or as large captions")
+                    CallButton(symbol: "phone.down.fill", label: "End", tint: Theme.danger) { calls.end() }
+                        .accessibilityLabel("End call")
+                }
+                .padding(.top, 12)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+                .glassEffect(.regular, in: .rect(cornerRadius: 36))
             }
-            .padding(.vertical, 16)
-            .frame(maxWidth: .infinity)
-            .background(NeoCallTheme.background)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
         }
     }
 
-    /// The system's list of sound devices: filled while the speaker or a connected device has the sound, read from the
-    /// route the session really has.
+    private var isCaptions: Bool { transcriptStyle == NeoCallTranscript.Style.captions.rawValue }
+
+    /// A typed turn of the call (`call.say_text`).
+    private var typeField: some View {
+        HStack(spacing: 8) {
+            TextField("Type into the call", text: $typed, axis: .vertical)
+                .lineLimit(1...4)
+                .focused($typingFocused)
+                .submitLabel(.send)
+                .onSubmit(sendTyped)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.composer))
+            Button(action: sendTyped) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.inkForeground)
+                    .frame(width: 36, height: 36)
+                    .background(Theme.ink, in: Circle())
+            }
+            .disabled(typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .accessibilityLabel("Send to the call")
+        }
+    }
+
+    private func sendTyped() {
+        calls.say(typed)
+        typed = ""
+    }
+
+    /// The system's list of sound devices (iPhone, speaker, AirPlay, Bluetooth, headphones), drawn as a `CallButton`.
     private var routeButton: some View {
         let filled = calls.outputState.routeIsFilled
-        return ZStack {
-            Circle().fill(filled ? NeoCallTheme.primaryText : NeoCallTheme.botBubble)
-            NeoRoutePicker(active: filled)
+        return VStack(spacing: 6) {
+            ZStack {
+                Circle().fill(filled ? Theme.ink : Theme.controlFill)
+                NeoRoutePicker(active: filled)
+            }
+            .frame(width: 56, height: 56)
+            Text("Audio")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .lineLimit(1)
         }
-        .frame(width: 56, height: 56)
+        .frame(width: 64)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Audio route")
         .accessibilityValue(CallOutputPresentation.routeValue(calls.outputState))
         .accessibilityHint("Chooses the iPhone, the speaker, AirPlay, Bluetooth or headphones")
-    }
-
-    private func roundButton(
-        title: String, image: String, filled: Bool, tint: Color = NeoCallTheme.userBubble, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: image)
-                    .font(.title3)
-                    .frame(width: 56, height: 56)
-                    .background(filled ? tint : NeoCallTheme.botBubble, in: Circle())
-                    .foregroundStyle(filled ? NeoCallTheme.onUserBubble : NeoCallTheme.primaryText)
-                Text(title).font(.caption).foregroundStyle(NeoCallTheme.secondaryText)
-            }
-            .frame(minWidth: NeoCallTheme.tapTarget, minHeight: NeoCallTheme.tapTarget)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
     }
 }
 

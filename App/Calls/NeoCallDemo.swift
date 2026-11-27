@@ -8,7 +8,8 @@ import HermesKit
 // the comparison screenshots. Debug only.
 
 nonisolated private let demoCallId = "123e4567-e89b-12d3-a456-426614174000"
-nonisolated private let demoBotKey = "oracle::hermesbot"
+/// `-NEO_CALL_DEMO_BOT oracle::researcher` calls a bot the mock gateway has (its chat then gets the call's card).
+nonisolated private var demoBotKey: String { UserDefaults.standard.string(forKey: "NEO_CALL_DEMO_BOT") ?? "oracle::hermesbot" }
 
 nonisolated private func frame(_ object: [String: Any]) -> String {
     String(decoding: (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data(), as: UTF8.self)
@@ -119,7 +120,8 @@ enum NeoCallDemo {
         let link = NeoDemoLink()
         let calls = CallController(
             makeLink: { _ in link }, audio: NeoDemoAudio(), audioSession: VoiceAudioSession(driver: NeoDemoDriver()), microphone: NeoDemoMicrophone())
-        await calls.start(bot: CallBot(botKey: demoBotKey, name: "Hermes Bot", gatewayId: "oracle"))
+        let name = demoBotKey.hasSuffix("::researcher") ? "Research Buddy" : "Hermes Bot"
+        await calls.start(bot: CallBot(botKey: demoBotKey, name: name, gatewayId: "oracle"))
         link.hello()
         for _ in 0..<100 where calls.session?.role != .owner { try? await Task.sleep(for: .milliseconds(20)) }
         let turns: [(Bool, String)] = [
@@ -142,7 +144,14 @@ enum NeoCallDemo {
         for _ in 0..<100 where calls.displayItems.count < 3 || (calls.session?.captions.rows.count ?? 0) < 8 {
             try? await Task.sleep(for: .milliseconds(20))
         }
-        calls.isScreenShown = mode != "bar"
+        // `pill` and `summary` run minimised: the call pill in the open chat, and for `summary` its card once it ends.
+        calls.isScreenShown = mode != "bar" && mode != "pill" && mode != "summary"
+        if mode == "summary" {
+            Task {
+                try? await Task.sleep(for: .seconds(8))
+                link.end()
+            }
+        }
         if mode == "screen" {
             Task {
                 try? await Task.sleep(for: .seconds(2))
