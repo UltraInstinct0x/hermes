@@ -16,7 +16,7 @@ final class RequestCardUITests: XCTestCase {
         _ = try await seedNeedsYouApprovals()
         for appearance in ["light", "dark"] {
             let app = try await showNeedsYou(["-appearance", appearance])
-            for (bot, chat) in [("Hermes", "Build log"), ("Ada", "Release draft")] {
+            for (bot, chat) in [("Ops", "Build log"), ("Ada", "Release draft")] {
                 let card = app.cells.containing(.staticText, identifier: chat).firstMatch
                 XCTAssertTrue(card.buttons["needsYou.deny"].waitForExistence(timeout: 25))
                 XCTAssertTrue(card.buttons["needsYou.allow"].exists)
@@ -25,6 +25,7 @@ final class RequestCardUITests: XCTestCase {
             let approvals = app.staticTexts.matching(identifier: "needsYou.request")
                 .matching(NSPredicate(format: "label == 'Approval'"))
             XCTAssertEqual(approvals.count, 2, "The two open approvals should only appear under Needs You")
+            XCTAssertFalse(app.staticTexts["Waiting for your approval"].exists)
             let loadEarlier = app.buttons["Load Earlier"]
             XCTAssertTrue(loadEarlier.waitForExistence(timeout: 10))
             loadEarlier.tap()
@@ -56,7 +57,8 @@ final class RequestCardUITests: XCTestCase {
         XCTAssertFalse(flagged.buttons["needsYou.allow"].exists)
         XCTAssertFalse(flagged.buttons["needsYou.deny"].exists)
         flagged.buttons["Open Chat"].tap()
-        XCTAssertTrue(element(app, "label CONTAINS[c] 'Release review'").waitForExistence(timeout: 10))
+        XCTAssertTrue(flagged.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(element(app, "label CONTAINS[c] 'Release review'").waitForExistence(timeout: 15))
     }
 
     @MainActor
@@ -73,7 +75,7 @@ final class RequestCardUITests: XCTestCase {
             try XCTUnwrap(before["open"]?.first { ($0["session_id"] as? String) == sessions[profile] }?["ledger_id"] as? String)
         }
         let selectedID = try ledgerID("writer")
-        let otherID = try ledgerID("default")
+        let otherID = try ledgerID("ops")
         XCTAssertNotEqual(selectedID, otherID)
 
         selected.tap()
@@ -118,7 +120,7 @@ final class RequestCardUITests: XCTestCase {
         var sessions: [String: String] = [:]
         let fixtures = flagged
             ? [("writer", "Release draft", "approve"), ("writer", "Release review", "approve flagged")]
-            : [("default", "Build log", "approve"), ("writer", "Release draft", "approve")]
+            : [("ops", "Build log", "approve"), ("writer", "Release draft", "approve")]
         for (profile, title, prompt) in fixtures {
             let chat = try await call("session.create", ["profile": profile, "title": title])
             let runtime = try XCTUnwrap(chat["session_id"] as? String)
