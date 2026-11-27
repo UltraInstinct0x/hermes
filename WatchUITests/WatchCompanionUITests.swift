@@ -102,9 +102,16 @@ final class WatchCompanionUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchRequests() -> XCUIApplication {
+    func testSlowRequestCheckStaysLoadingAndThenShowsApproval() {
+        let app = launchRequests(extraArguments: ["-HERMES_WATCH_SLOW_REQUESTS", "YES"])
+        XCTAssertTrue(app.staticTexts["Checking requests…"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["watchRequest-srq-backup"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    private func launchRequests(extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-HERMES_WATCH_FIXTURE", "YES"]
+        app.launchArguments = ["-HERMES_WATCH_FIXTURE", "YES"] + extraArguments
         app.launch()
         let requests = app.buttons["Requests"]
         XCTAssertTrue(requests.waitForExistence(timeout: 5))

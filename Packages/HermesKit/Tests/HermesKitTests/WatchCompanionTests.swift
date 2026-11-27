@@ -2,6 +2,35 @@ import Foundation
 import HermesKit
 import Testing
 
+@Test func legacyRequestScanKeepsApprovalsWhenOtherSessionsCannotBeRead() async throws {
+    let source = LedgerSource.ID(gatewayID: "box", profileID: "writer")
+    let scan = try await RequestLedgerClient.scanLegacyRequests(source: source) { method, params in
+        #expect(params["profile"] == .string("writer"))
+        if method == "session.list" {
+            return .object(["sessions": .array([
+                .object(["id": .string("broken")]),
+                .object(["id": .string("stale"), "resolved_id": .string("owner")]),
+            ])])
+        }
+        if params["session_id"] == .string("broken") { throw URLError(.timedOut) }
+        #expect(method == "session.resume")
+        #expect(params["session_id"] == .string("owner"))
+        return .object(["open_requests": .array([
+            .object(["id": .string("srq-exact"), "method": .string("approval"), "params": .object([:])]),
+        ])])
+    }
+    #expect(scan.failure == .offline)
+    #expect(scan.rows.map(\.requestID) == ["srq-exact"])
+    #expect(scan.rows.first?.sessionID == "owner")
+}
+
+@Test func watchRequestCheckWireRoundTrips() throws {
+    let request = WatchCompanion.Request.openRequests(UUID())
+    let pending = WatchCompanion.Response.checkingRequests
+    #expect(try JSONDecoder().decode(WatchCompanion.Request.self, from: JSONEncoder().encode(request)) == request)
+    #expect(try JSONDecoder().decode(WatchCompanion.Response.self, from: JSONEncoder().encode(pending)) == pending)
+}
+
 @Test func watchRoutesDropRemovedGatewayBeforeAndAfterAnInFlightRefresh() throws {
     let removed = UUID()
     let kept = UUID()

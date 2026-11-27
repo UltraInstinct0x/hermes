@@ -317,6 +317,32 @@ public struct RequestLedgerClient: Sendable {
         }
     }
 
+    public static func scanLegacyRequests(
+        source: LedgerSource.ID, request: Transport
+    ) async throws -> (rows: [LedgerRow], failure: LedgerSource.State?) {
+        guard let profile = source.profileID else { return ([], nil) }
+        let listing = try await request("session.list", [
+            "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
+        ])
+        var rows: [LedgerRow] = []
+        var failure: LedgerSource.State?
+        for session in listing["sessions"]?.arrayValue ?? [] {
+            try Task.checkCancellation()
+            guard let key = session["resolved_id"]?.stringValue ?? session["id"]?.stringValue else { continue }
+            do {
+                let snapshot = try await request("session.resume", [
+                    "session_id": .string(key), "profile": .string(profile), "omit_messages": .bool(true),
+                ])
+                rows += legacyRows(snapshot: snapshot, sessionID: key, source: source)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                if failure == nil { failure = state(of: error) }
+            }
+        }
+        return (rows, failure)
+    }
+
     public static func legacyRows(snapshot: JSONValue, sessionID: String, source: LedgerSource.ID) -> [LedgerRow] {
         guard let profile = source.profileID, case .array(let open)? = snapshot["open_requests"] else { return [] }
         return open.compactMap { frame in
