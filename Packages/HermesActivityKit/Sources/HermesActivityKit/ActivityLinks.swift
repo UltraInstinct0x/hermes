@@ -8,6 +8,7 @@ public enum ActivityLink: Equatable, Sendable {
     /// A bot's chat.
     case bot(key: String)
     case request(RequestReference)
+    case lookup(botKey: String, requestId: String)
     public static let scheme = "hermesneo"
 
     public var url: URL {
@@ -25,8 +26,13 @@ public enum ActivityLink: Equatable, Sendable {
                 URLQueryItem(name: "key", value: ref.botKey),
                 URLQueryItem(name: "session", value: ref.sessionId),
                 URLQueryItem(name: "request", value: ref.requestId),
-                URLQueryItem(name: "generation", value: String(ref.executionGeneration)),
             ]
+            if let generation = ref.executionGeneration {
+                parts.queryItems?.append(URLQueryItem(name: "generation", value: String(generation)))
+            }
+        case .lookup(let botKey, let requestId):
+            parts.host = "request-lookup"
+            parts.queryItems = [URLQueryItem(name: "key", value: botKey), URLQueryItem(name: "request", value: requestId)]
         }
         // Components with a scheme and a host always form a URL.
         return parts.url ?? URL(fileURLWithPath: "/")
@@ -45,10 +51,16 @@ public enum ActivityLink: Equatable, Sendable {
         case "requests": self = .waiting
         case "request-bot": guard let key, !key.isEmpty else { return nil }; self = .bot(key: key)
         case "request-card":
+            let generations = items.filter { $0.name == "generation" }
+            let generation = field("generation").flatMap(Int.init)
+            guard generations.isEmpty || generation != nil else { return nil }
             guard let key, let request = field("request"),
                   let ref = RequestReference(botKey: key, requestId: request, sessionId: field("session"),
-                                             executionGeneration: field("generation").flatMap(Int.init)) else { return nil }
+                                             executionGeneration: generation) else { return nil }
             self = .request(ref)
+        case "request-lookup":
+            guard let key, !key.isEmpty, let request = field("request"), !request.isEmpty else { return nil }
+            self = .lookup(botKey: key, requestId: request)
         default: return nil
         }
     }

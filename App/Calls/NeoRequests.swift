@@ -115,10 +115,29 @@ enum NeoNotificationRouting {
 
     nonisolated static func handle(_ response: UNNotificationResponse, completion: @escaping @Sendable () -> Void) -> Bool {
         guard let reply = BoxRequestNotifications.reply(userInfo: response.notification.request.content.userInfo,
-                                                        action: response.actionIdentifier) else { return false }
+                                                        action: response.actionIdentifier,
+                                                        answersEnabled: NotificationCatalog.neoLockScreenAnswersEnabled) else { return false }
+        let identifier = response.notification.request.identifier
         Task { @MainActor in
             NeoBox.shared.push.notePushReceived()
-            if case .open(let botKey) = reply { NeoBox.shared.openRequestLink(.bot(key: botKey)) }
+            switch reply {
+            case .open(let botKey):
+                NeoBox.shared.openRequestLink(.bot(key: botKey))
+            case .lookup(let botKey, let requestId):
+                NeoBox.shared.openRequestLink(.lookup(botKey: botKey, requestId: requestId))
+            case .type(let reference):
+                NeoBox.shared.openRequestLink(.request(reference))
+            case .answer(let reference, let selection, let shown):
+                if let outcome = await NeoBox.shared.submitRequest(reference, shown: shown, selection: selection) {
+                    let center = UNUserNotificationCenter.current()
+                    center.removeDeliveredNotifications(withIdentifiers: [identifier])
+                    let receipt = UNMutableNotificationContent()
+                    receipt.title = RequestActivityPresentation.finalLine(outcome, answeredBy: nil)
+                    try? await center.add(UNNotificationRequest(identifier: identifier, content: receipt, trigger: nil))
+                }
+            case .dismissed:
+                break
+            }
             completion()
         }
         return true
@@ -126,27 +145,60 @@ enum NeoNotificationRouting {
 }
 
 extension NeoBox: NeoActivityButtonHandling {
-    func answerApproval(botKey: String, requestId: String, shown: String, allow: Bool) async -> Bool {
-        await answerRequest(botKey: botKey, requestId: requestId, shown: shown, answer: .approval(allow ? .once : .deny))
+    func answerActivity(reference: RequestReference, shown: String, action: RequestActivityPresentation.Action) async {
+        let matching = Activity<RequestActivityAttributes>.activities.filter { RequestReference($0.content.state) == reference }
+        guard matching.count == 1, let activity = matching.first,
+              RequestActivityPresentation(activity.content.state)
+                .actions(lockScreenAnswersEnabled: NotificationCatalog.neoLockScreenAnswersEnabled,
+                         isStale: activity.activityState == .stale).contains(action) else { return }
+        let selection: RequestSelection
+        switch action {
+        case .approve, .deny:
+            guard activity.content.state.command == shown else { return }
+            selection = .approval(allow: action == .approve)
+        case .choice(_, let label):
+            guard activity.content.state.detail == shown else { return }
+            selection = .clarification(label, questionId: reference.isFrame ? activity.content.state.questionId : nil)
+        case .openToAnswer, .typeAnAnswer:
+            return
+        }
+        _ = await submitRequest(reference, shown: shown, selection: selection)
     }
 
-    func answerChoice(botKey: String, requestId: String, questionId: String, choice: String, shown: String) async -> Bool {
-        await answerRequest(botKey: botKey, requestId: requestId, shown: shown, answer: .clarify([questionId: .text(choice)]))
+    func submitRequest(_ reference: RequestReference, shown: String, selection: RequestSelection) async -> RequestActivityAttributes.ContentState.Outcome? {
+        guard NotificationCatalog.neoLockScreenAnswersEnabled,
+              let outcome = await answerRequest(reference, shown: shown, selection: selection) else { return nil }
+        for activity in Activity<RequestActivityAttributes>.activities {
+            var state = activity.content.state
+            guard RequestReference(state) == reference, state.outcome == nil else { continue }
+            state.outcome = outcome
+            await activity.update(ActivityContent(state: state, staleDate: nil))
+        }
+        if outcome == .noLongerWaiting {
+            await UIApplication.shared.open(ActivityLink.request(reference).url)
+        }
+        return outcome
     }
 }
 
 #if DEBUG
 enum NeoRequestActivityDemo {
     static func startIfAsked() async {
-        guard LaunchFlags.take("NEO_REQUEST_ACTIVITY_DEMO") != nil else { return }
+        guard let mode = LaunchFlags.take("NEO_REQUEST_ACTIVITY_DEMO") else { return }
+        #if targetEnvironment(simulator)
+        PushShared.current.defaults.set(mode != "1", forKey: "NEO_LOCK_SCREEN_ANSWER_DEMO")
+        #endif
         for activity in Activity<RequestActivityAttributes>.activities {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
         let now = Date()
+        let question = mode == "clarify"
         let state = RequestActivityAttributes.ContentState(
-            botKey: "demo::hermes", requestId: "demo-approval", botName: "Hermes",
-            style: .approval, detail: "swift test --filter RequestTests", since: now,
-            moreWaiting: 1)
+            botKey: "demo::hermes", requestId: mode == "1" ? "demo-request" : "demo-answer-request", botName: "Hermes",
+            style: question ? .question : .approval, detail: question ? "Which report should I open?" : "git status",
+            since: now, choices: question ? ["Weekly", "Monthly"] : [], moreWaiting: 1,
+            sessionId: "demo-session", executionGeneration: 1, command: question ? nil : "git status",
+            approvalKind: question ? nil : "command")
         do {
             _ = try Activity.request(attributes: RequestActivityAttributes(),
                                      content: ActivityContent(state: state, staleDate: nil), pushType: nil)

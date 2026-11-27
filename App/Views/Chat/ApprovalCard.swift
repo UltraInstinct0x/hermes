@@ -1,3 +1,4 @@
+import HermesActivityKit
 import HermesKit
 import SwiftUI
 
@@ -38,11 +39,14 @@ struct ApprovalCard: View {
     /// a memory save: those are read and answered one at a time.
     private var isBatch: Bool {
         !waiting.isEmpty && !reviewingEach && onChoiceForAll != nil
-            && all.allSatisfy { !$0.smartDenied && !$0.isMemorySave && !$0.isPaymentFill && Self.showsWholeInBatch($0.summary) }
+            && all.allSatisfy {
+                InlineApproval.isOrdinary(smartDenied: $0.smartDenied, memorySave: $0.isMemorySave, paymentFill: $0.isPaymentFill)
+                    && Self.showsWholeInBatch($0.summary)
+            }
     }
 
     static func showsWholeInBatch(_ command: String) -> Bool {
-        command.count <= 240 && command.split(whereSeparator: \.isNewline).count <= 4
+        InlineApproval.showsWholeCommand(command)
     }
 
     var body: some View {
@@ -149,14 +153,18 @@ struct ApprovalCard: View {
         let showsAlways = approval.choices.contains(.always)
         return Grid(horizontalSpacing: 10, verticalSpacing: 10) {
             GridRow {
-                ActionTile(symbol: "xmark", title: String(localized: "Deny"), detail: String(localized: "Don't run it"), style: .danger) {
-                    onChoice(.deny)
+                if approval.choices.contains(.deny) {
+                    ActionTile(symbol: "xmark", title: String(localized: "Deny"), detail: String(localized: "Don't run it"), style: .danger) {
+                        onChoice(.deny)
+                    }
+                    .keyboardShortcut(panelOverChat ? nil : .cancelAction)
                 }
-                .keyboardShortcut(panelOverChat ? nil : .cancelAction)
-                ActionTile(symbol: "checkmark", title: String(localized: "Allow Once"), detail: String(localized: "Only this command"), style: .primary) {
-                    onChoice(.once)
+                if approval.choices.contains(.once) {
+                    ActionTile(symbol: "checkmark", title: String(localized: "Allow Once"), detail: String(localized: "Only this command"), style: .primary) {
+                        onChoice(.once)
+                    }
+                    .keyboardShortcut(.defaultAction)
                 }
-                .keyboardShortcut(.defaultAction)
             }
             if showsSession || showsAlways {
                 GridRow {

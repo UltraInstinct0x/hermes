@@ -95,7 +95,6 @@ targets:
         destinationFilters: [iOS]
       - package: HermesActivityKit
         product: HermesActivityKit
-        destinationFilters: [iOS]
       - target: HermesNotificationService
         destinationFilters: [iOS]
       - target: HermesNotificationContent
@@ -268,6 +267,10 @@ targets:
     dependencies:
       - package: HermesKit
         product: HermesPush
+      - package: HermesBox
+        product: HermesBox
+      - package: HermesActivityKit
+        product: HermesActivityKit
       - sdk: UserNotificationsUI.framework
     settings:
       base:

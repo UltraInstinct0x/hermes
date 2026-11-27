@@ -16,6 +16,7 @@ public enum BoxRequestNotifications {
     public enum Reply: Sendable, Equatable {
         /// A plain tap: open the app (the bot's chat shows the request).
         case open(botKey: String)
+        case lookup(botKey: String, requestId: String)
         case type(RequestReference)
         case answer(RequestReference, RequestSelection, shown: String)
         /// Swiped away: nothing to do.
@@ -37,6 +38,10 @@ public enum BoxRequestNotifications {
                              now: Date = .now) -> Reply? {
         guard isBoxNotification(userInfo), let botKey = userInfo["botKey"] as? String else { return nil }
         if action == dismissAction { return .dismissed }
+        if action == defaultAction, userInfo["needsApp"] as? Bool == true || userInfo["sessionId"] != nil {
+            if let state = contentState(userInfo), let ref = RequestReference(state) { return .type(ref) }
+            if let requestId = userInfo["requestId"] as? String { return .lookup(botKey: botKey, requestId: requestId) }
+        }
         guard let state = contentState(userInfo), let ref = RequestReference(state) else { return .open(botKey: botKey) }
         let actions = RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: answersEnabled, isStale: false, now: now)
         guard let selection = actions.first(where: { identifier(for: $0) == action }) else {
@@ -47,7 +52,7 @@ public enum BoxRequestNotifications {
             guard let command = state.command else { return nil }
             return .answer(ref, .approval(allow: selection == .approve), shown: command)
         case .choice(_, let choice):
-            return .answer(ref, .clarification(choice), shown: state.detail)
+            return .answer(ref, .clarification(choice, questionId: ref.isFrame ? state.questionId : nil), shown: state.detail)
         case .typeAnAnswer:
             return .type(ref)
         case .openToAnswer:
@@ -75,7 +80,8 @@ public enum BoxRequestNotifications {
               let fields = try? JSONDecoder().decode(Fields.self, from: data) else { return nil }
         return .init(botKey: botKey, requestId: requestId,
                      botName: (aps["alert"] as? [String: String])?["title"] ?? "Hermes",
-                     style: category == approvalCategory ? .approval : .question, detail: fields.prompt ?? "",
+                     style: category == approvalCategory ? .approval : .question,
+                     detail: fields.prompt ?? (aps["alert"] as? [String: String])?["body"] ?? "",
                      deadline: fields.expiresAt.map(Date.init(timeIntervalSince1970:)),
                      since: Date(timeIntervalSince1970: fields.createdAt ?? 0), choices: fields.choices ?? [],
                      needsApp: fields.needsApp != false, questionId: fields.questionId, sessionId: fields.sessionId,

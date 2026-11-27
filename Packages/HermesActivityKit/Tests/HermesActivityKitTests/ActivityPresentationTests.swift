@@ -183,11 +183,14 @@ struct ActivityPresentationTests {
         state.command = "git status"
         state.approvalKind = "command"
         let live = RequestActivityPresentation(state)
-        #expect(live.actions(lockScreenAnswersEnabled: true, isStale: false) == [.approve, .deny])
+        #expect(live.actions(lockScreenAnswersEnabled: true, isStale: false) == [.openToAnswer])
         #expect(live.actions(lockScreenAnswersEnabled: false, isStale: false) == [.openToAnswer])
         #expect(live.actions(lockScreenAnswersEnabled: true, isStale: true) == [.openToAnswer])
         state.requestId = "a12345678901b12345678901c1234567"
         #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.approve, .deny])
+        state.command = String(repeating: "x", count: 241)
+        #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.openToAnswer])
+        state.command = "git status"
         state.approvalKind = "restricted"
         #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.openToAnswer])
         state.outcome = .expired
@@ -197,6 +200,7 @@ struct ActivityPresentationTests {
     @Test func aSingleChoiceQuestionAlwaysOffersTyping() {
         var state = approval(deadline: nil, detail: "Which color?")
         state.style = .question
+        state.requestId = "native-question"
         state.sessionId = "session-1"
         state.executionGeneration = 1
         state.choices = ["Red", "Blue"]
@@ -206,6 +210,19 @@ struct ActivityPresentationTests {
         state.needsApp = true
         #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.typeAnAnswer])
         state.choices = []
+        #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.typeAnAnswer])
+    }
+
+    @Test func aFrameQuestionUsesItsExactLinkWithoutAGeneration() throws {
+        var state = question()
+        state.sessionId = "session-1"
+        let reference = try #require(RequestReference(state))
+        #expect(reference.isFrame)
+        let link = ActivityLink.request(reference)
+        #expect(ActivityLink(url: link.url) == link)
+        #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false)
+            == [.choice(index: 0, label: "eu"), .choice(index: 1, label: "us"), .typeAnAnswer])
+        state.questionId = nil
         #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.typeAnAnswer])
     }
 

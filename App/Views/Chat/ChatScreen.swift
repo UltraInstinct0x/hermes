@@ -1,3 +1,4 @@
+import HermesActivityKit
 import HermesKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -343,7 +344,44 @@ struct ChatScreen: View {
 
     @ViewBuilder
     private var requestDock: some View {
-        if docksRequest {
+        if let card = conversation.ledgerApproval {
+            ApprovalCard(approval: card.prompt.approval, asker: askerName) { choice in
+                Task {
+                    let outcome = await app.needsYou.answerNativeRequest(card.reference, selection: .approval(allow: choice == .once),
+                                                                         shown: card.prompt.command ?? "", choiceOnCard: choice)
+                    guard conversation.ledgerApproval?.reference == card.reference else { return }
+                    if let outcome {
+                        conversation.ledgerApproval = nil
+                        conversation.recordRequestOutcome(outcome)
+                    } else {
+                        conversation.banner = .invalidResponse(String(localized: "Couldn't answer. Check again."))
+                    }
+                }
+            }
+            .id(card.reference)
+            .modifier(DockSlot(id: "approval", glass: bottomGlass))
+        } else if let card = conversation.ledgerClarification {
+            let request = HermesRequest(id: card.reference.requestId, method: "clarify", kind: .clarify([card.question]))
+            ClarifyCard(request: request, questions: [card.question], conversation: conversation) { answer in
+                if answer.isEmpty {
+                    conversation.ledgerClarification = nil
+                    return
+                }
+                Task {
+                    let outcome = await app.needsYou.answerNativeRequest(card.reference, selection: .clarification(answer),
+                                                                        shown: card.question.question, acceptsTypedAnswer: true)
+                    guard conversation.ledgerClarification?.reference == card.reference else { return }
+                    if let outcome {
+                        conversation.ledgerClarification = nil
+                        conversation.recordRequestOutcome(outcome)
+                    } else {
+                        conversation.banner = .invalidResponse(String(localized: "Couldn't answer. Check again."))
+                    }
+                }
+            }
+            .id(card.reference)
+            .modifier(DockSlot(id: "approval", glass: bottomGlass))
+        } else if docksRequest {
             NeedsYouDock(conversation: conversation) { composerFocused = false }
                 .modifier(DockSlot(id: "dock", glass: bottomGlass))
         } else if let approval = conversation.pendingApproval {
@@ -528,7 +566,8 @@ struct ChatScreen: View {
 
     private var bottomBar: some View {
         VStack(spacing: 10) {
-            if conversation.pendingApproval != nil || !conversation.requests.isEmpty {
+            if conversation.pendingApproval != nil || !conversation.requests.isEmpty
+                || conversation.ledgerClarification != nil || conversation.ledgerApproval != nil {
                 fittedRequestDock
                     .transition(reduceMotion ? .opacity : .risesFromComposer)
             }

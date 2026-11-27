@@ -133,13 +133,13 @@ public struct RequestActivityPresentation: Equatable, Sendable {
         guard state.outcome == nil, state.style != .computerOnly else { return [] }
         guard lockScreenAnswersEnabled, !isStale,
               state.deadline.map({ $0 > now }) ?? true,
-              RequestReference(state) != nil else { return [.openToAnswer] }
+              let reference = RequestReference(state) else { return [.openToAnswer] }
         if state.style == .approval {
-            guard state.approvalKind == "command",
+            guard !reference.isFrame, !state.needsApp, state.approvalKind == "command",
                   let command = state.command, InlineApproval.showsWholeCommand(command) else { return [.openToAnswer] }
         }
         if state.style == .question {
-            guard !state.needsApp,
+            guard !state.needsApp, !reference.isFrame || state.questionId?.isEmpty == false,
                   !state.detail.isEmpty, state.detail.count <= Self.detailLimit,
                   !state.choices.isEmpty, state.choices.count <= Self.maxChoiceButtons,
                   Set(state.choices).count == state.choices.count,

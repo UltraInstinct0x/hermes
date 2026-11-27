@@ -667,7 +667,76 @@ def cancel_request(rid, reason, state="withdrawn"):
 def open_requests(sid):
     with LOCK:
         return [{"id": rid, "method": e["frame"]["method"], "params": e["frame"]["params"]}
-                for rid, e in PENDING.items() if e["sid"] == sid]
+                for rid, e in PENDING.items() if e["sid"] == sid and "native" not in e]
+
+
+def native_prompt_snapshot(sid):
+    if not CONFIG.get("session_authority"):
+        return {}
+    with LOCK:
+        return {"execution_generation": RUNTIME[sid].get("execution_generation", 0),
+                "prompts": [e["native"] for e in PENDING.values() if e["sid"] == sid and "native" in e]}
+
+
+def native_request(sid, kind, fields, timeout=300):
+    prompt_id = uuid.uuid4().hex
+    with LOCK:
+        generation = RUNTIME[sid]["execution_generation"]
+        prompt = {"prompt_id": prompt_id, "kind": kind, "execution_generation": generation, **fields}
+        entry = {"sid": sid, "event": threading.Event(), "result": None, "native": prompt}
+        entry["row"] = LEDGER.opened(prompt_id, sid, kind, fields, timeout)
+        PENDING[prompt_id] = entry
+    emit(sid, kind + ".request", prompt)
+    if not entry["event"].wait(timeout):
+        cancel_request(prompt_id, "timeout", "expired")
+    return entry["result"]
+
+
+def run_native_request(sid, text):
+    if not CONFIG.get("session_authority"):
+        return None
+    if "native approve" in text:
+        result = native_request(sid, "approval", {"command": "git status", "choices": ["once", "deny"]})
+    elif "native clarify" in text:
+        result = native_request(sid, "clarify", {"question": "Which report should I open?",
+                                               "choices": ["Weekly", "Monthly"], "multi_select": False})
+    else:
+        return None
+    return "Answered." if result else "No longer waiting."
+
+
+def answer_native_prompt(params, kind):
+    def refuse(reason):
+        raise RPCError(4001, reason, {"reason": reason})
+
+    field = "choice" if kind == "approval" else "answer"
+    if set(params) - {"profile"} != {"session_id", "execution_generation", "prompt_id", field}:
+        refuse("invalid_params")
+    if not isinstance(params["prompt_id"], str) or not isinstance(params[field], str):
+        refuse("invalid_params")
+    with LOCK:
+        session = params["session_id"]
+        sid = next((key for key, runtime in RUNTIME.items()
+                    if not runtime.get("dead") and runtime["stored"] == session), None)
+        if sid is None:
+            refuse("not_found")
+        runtime = RUNTIME[sid]
+        if getattr(CURRENT, "peer", None) not in runtime["peers"]:
+            refuse("permission_denied")
+        generation = params["execution_generation"]
+        if type(generation) is not int or generation != runtime["execution_generation"] or not runtime["running"]:
+            refuse("stale_generation")
+        prompt_id = params["prompt_id"]
+        entry = PENDING.get(prompt_id)
+        if entry is None or entry["sid"] != sid or "native" not in entry:
+            return {"status": "already_resolved", "prompt_id": prompt_id}
+        prompt = entry["native"]
+        if prompt["kind"] != kind or (kind == "approval" and params[field] not in prompt["choices"]):
+            refuse("invalid_params")
+        result = {"choice": params[field]} if kind == "approval" else {"answers": {prompt_id: params[field]}}
+        LEDGER.settle(prompt_id, result=result)
+    emit(sid, kind + ".settled", {"prompt_id": prompt_id, "execution_generation": generation})
+    return {"status": "resolved", "prompt_id": prompt_id}
 
 
 # ── Scripted turns ───────────────────────────────────────────────────────────
@@ -1279,6 +1348,9 @@ def run_turn(sid, text):
     visible = text.split("\n\n[@mentions resolved", 1)[0]
     mock_warnings(sid, visible)
     model_switches(sid, visible)
+    if (answer := run_native_request(sid, lower)) is not None:
+        stream(sid, answer)
+        return finish(sid, stored, answer)
 
     if lower.startswith("hey, tell me about yourself"):
         intro = (f"Hi! I'm **{me}**. This is our Bot Chat, one continuous conversation that never resets. "
@@ -2295,11 +2367,11 @@ def method_session_resume(params):
         omit = bool(params.get("omit_messages"))
         queue = runtime.get("queue", [])
         if CONFIG.get("session_authority"):
-            queue_snapshot = {"execution_generation": runtime.get("execution_generation", 0),
+            queue_snapshot = {**native_prompt_snapshot(sid),
                               "pending": [{"status": "queued", "text": entry["text"]} for entry in queue]}
         else:
             queue_snapshot = {"queued": {"user": queue[0]["text"]} if queue else None}
-        return {"session_id": sid, "resumed": stored, "message_count": len(session["messages"]),
+        return {"session_id": stored if queue_snapshot.get("prompts") else sid, "resumed": stored, "message_count": len(session["messages"]),
                 **queue_snapshot,
                 "messages": [] if omit else session["messages"], "messages_omitted": omit,
                 "info": {"model": PROFILES[profile]["model"], "running": runtime["running"]},
@@ -2737,6 +2809,8 @@ METHODS = {
     "session.title": method_session_title,
     "session.list": method_session_list,
     "session.resume": method_session_resume,
+    "approval.respond": lambda params: answer_native_prompt(params, "approval"),
+    "clarify.respond": lambda params: answer_native_prompt(params, "clarify"),
     "session.activate": method_session_activate,
     "session.interrupt": method_session_interrupt,
     "session.compress": method_session_compress,
@@ -3211,13 +3285,13 @@ class Handler(BaseHTTPRequestHandler):
                 wanted = body.get("method")
                 key = body.get("ledger_id")
                 rid = next((r for r, e in reversed(list(PENDING.items()))
-                            if (not wanted or e["frame"]["method"] == wanted)
+                            if (not wanted or e["row"]["kind"] == wanted)
                             and (not key or e["row"].get("ledger_id") == key)), None)
                 if rid is None:
                     return self.send_json(404, {"detail": "No open request"})
                 entry = PENDING[rid]
-                method = entry["frame"]["method"]
-                questions = entry["frame"]["params"].get("questions") or []
+                method = entry["row"]["kind"]
+                questions = entry.get("frame", {}).get("params", {}).get("questions") or []
                 default = ({"choice": "once", "all": False} if method == "approval" else
                            {"answers": {q.get("qid", ""): (q.get("choices") or ["Yes"])[0] for q in questions}}
                            if method == "clarify" else {"value": ""})
@@ -3375,17 +3449,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         rid, method = frame.get("id"), frame.get("method")
         if method is None and rid is not None:
-            if "error" in frame:
-                with LOCK:
-                    entry = PENDING.get(rid)
-                    if entry is None:
-                        return
+            with LOCK:
+                entry = PENDING.get(rid)
+                if entry is None or "native" in entry:
+                    return
+                if "error" in frame:
                     # A "not shown here" decline settles only once every asked client said so.
                     entry["declined"].add(peer)
                     if entry["declined"] >= entry["asked"]:
                         LEDGER.settle(rid, state="cancelled", reason="not_shown")
-            else:
-                LEDGER.settle(rid, result=frame.get("result"), by=peer.identity, via="frame")
+                else:
+                    LEDGER.settle(rid, result=frame.get("result"), by=peer.identity, via="frame")
             return
         handler = METHODS.get(method)
         if CONFIG.get("session_authority") and method in AUTHORITY_UNKNOWN:
@@ -3417,6 +3491,12 @@ class Handler(BaseHTTPRequestHandler):
             if method in ("session.create", "session.resume", "session.activate") and result.get("session_id") in RUNTIME:
                 with LOCK:
                     RUNTIME[result["session_id"]]["peers"].add(peer)
+            elif method == "session.resume" and result.get("prompts"):
+                with LOCK:
+                    for runtime in RUNTIME.values():
+                        if not runtime.get("dead") and runtime["stored"] == result.get("session_id"):
+                            runtime["peers"].add(peer)
+                            break
             # Like Hermes' prompt.submit (methods_prompt.py): the session is bound to the socket that
             # sent the prompt, so its turn's events reach a client that reconnected meanwhile.
             submitted = (frame.get("params") or {}).get("session_id") if method == "prompt.submit" else None

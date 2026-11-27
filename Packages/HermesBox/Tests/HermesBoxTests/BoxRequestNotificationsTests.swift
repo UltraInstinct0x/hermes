@@ -45,6 +45,7 @@ struct BoxRequestNotificationsTests {
         payload["sessionId"] = "session-1"
         payload["executionGeneration"] = 7
         payload["command"] = "git status"
+        payload["needsApp"] = false
         let ref = try #require(RequestReference(botKey: "oracle::hermesbot", requestId: "req-9",
                                                  sessionId: "session-1", executionGeneration: 7))
         #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.approveAction, answersEnabled: true) == nil)
@@ -72,5 +73,28 @@ struct BoxRequestNotificationsTests {
         payload["needsApp"] = true
         #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.typeAction, answersEnabled: true) == .type(ref))
         #expect(BoxRequestNotifications.reply(userInfo: payload, action: "hermes.request.choice.1", answersEnabled: true) == nil)
+    }
+
+    @Test func restrictedBoxApprovalOpensByLookupWithoutAnswerIdentity() {
+        let payload: [AnyHashable: Any] = [
+            "aps": ["alert": ["title": "Hermes Bot needs your approval", "body": "git status"], "sound": "default",
+                    "thread-id": "oracle::hermesbot"],
+            "botKey": "oracle::hermesbot", "requestId": "native-approval", "approvalKind": "restricted", "needsApp": true,
+        ]
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: "com.apple.UNNotificationDefaultActionIdentifier")
+            == .lookup(botKey: "oracle::hermesbot", requestId: "native-approval"))
+        #expect(BoxRequestNotifications.contentState(payload) == nil)
+    }
+
+    @Test func frameChoiceKeepsItsQuestionIDAndUsesTheAlertBody() throws {
+        let payload: [AnyHashable: Any] = [
+            "aps": ["category": BoxRequestNotifications.questionCategory, "alert": ["body": "Which region?"]],
+            "botKey": "oracle::hermesbot", "requestId": "srq-frame", "sessionId": "s1",
+            "choices": ["US", "EU"], "questionId": "q1", "needsApp": false,
+        ]
+        let ref = try #require(RequestReference(botKey: "oracle::hermesbot", requestId: "srq-frame",
+                                                 sessionId: "s1", executionGeneration: nil))
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: "hermes.request.choice.0", answersEnabled: true)
+            == .answer(ref, .clarification("US", questionId: "q1"), shown: "Which region?"))
     }
 }

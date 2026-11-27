@@ -42,8 +42,46 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
     }
 
     public func approval(in snapshot: JSONValue) -> ApprovalRequest? {
+        nativeApproval(in: snapshot)?.approval ?? legacyApproval(in: snapshot)
+    }
+
+    public func legacyApproval(in snapshot: JSONValue) -> ApprovalRequest? {
         guard kind == "approval", let request = openRequest(in: snapshot) else { return nil }
         return GatewayTurnDecoder.approval(from: request)
+    }
+
+    public func nativeApproval(in snapshot: JSONValue, generation: Int? = nil) -> NativeApproval? {
+        guard kind == "approval", state == "open", !requestID.hasPrefix("srq-"), let sessionID,
+              let prompt = Self.nativePrompt(in: snapshot, sessionID: sessionID, requestID: requestID,
+                                             generation: generation, kind: kind),
+              let offered = prompt["choices"]?.arrayValue,
+              var approval: ApprovalRequest = try? RequestLedgerClient.decode(prompt),
+              let generation = approval.executionGeneration else { return nil }
+        approval.requestID = requestID
+        approval.choices = approval.choices.filter { offered.contains(.string($0.rawValue)) }
+        guard !approval.choices.isEmpty else { return nil }
+        return NativeApproval(approval: approval, command: prompt["command"]?.stringValue, generation: generation,
+                              isPlainCommand: prompt["tool_name"]?.stringValue == "terminal"
+                                  && prompt["smart_denied"]?.boolValue == false && prompt["edit"] == nil)
+    }
+
+    public struct NativeApproval: Sendable {
+        public let approval: ApprovalRequest
+        public let command: String?
+        public let generation: Int
+        public let isPlainCommand: Bool
+    }
+
+    public static func nativePrompt(in snapshot: JSONValue, sessionID: String, requestID: String,
+                                    generation: Int?, kind: String) -> JSONValue? {
+        guard !sessionID.isEmpty, !requestID.isEmpty, snapshot["session_id"]?.stringValue == sessionID,
+              let liveGeneration = snapshot["execution_generation"]?.doubleValue.flatMap(Int.init(exactly:)),
+              liveGeneration >= 0, generation == nil || generation == liveGeneration else { return nil }
+        let matches = snapshot["prompts"]?.arrayValue?.filter {
+            $0["prompt_id"]?.stringValue == requestID && $0["kind"]?.stringValue == kind
+                && $0["execution_generation"]?.doubleValue == Double(liveGeneration)
+        } ?? []
+        return matches.count == 1 ? matches[0] : nil
     }
 
     public func openRequest(in snapshot: JSONValue) -> GatewayServerRequest? {

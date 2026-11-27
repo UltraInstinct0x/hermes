@@ -266,6 +266,32 @@ final class NeoBox {
 
     func openRequestLink(_ link: ActivityLink, window: UUID? = nil) {
         guard let app else { pendingRequestLink = link; return }
+        let target: (String, String, RequestReference?)?
+        switch link {
+        case .request(let ref): target = (ref.botKey, ref.requestId, ref)
+        case .lookup(let botKey, let requestId): target = (botKey, requestId, nil)
+        default: target = nil
+        }
+        if let (botKey, requestId, reference) = target {
+            Task {
+                guard let row = await app.needsYou.resolveRequest(botKey: botKey, requestId: requestId, sessionId: reference?.sessionId,
+                                                                 workspaces: Array(app.workspaces.values)) else {
+                    openRequestLink(.waiting, window: window)
+                    return
+                }
+                await app.needsYou.loadRequestNames(row)
+                if let conversation = app.needsYou.openLocalChat(row, app: app, window: window) {
+                    if row.kind == "clarify" {
+                        await app.needsYou.openClarification(row, reference: reference, in: conversation)
+                    } else if row.kind == "approval" {
+                        await app.needsYou.openApproval(row, reference: reference, in: conversation)
+                    }
+                } else {
+                    openRequestLink(.waiting, window: window)
+                }
+            }
+            return
+        }
         if case .bot(let key) = link {
             let bot = BotKey(rawValue: key)
             let matches = app.workspaces.values.filter {
@@ -286,10 +312,11 @@ final class NeoBox {
         workspace.selection = nil
     }
 
-    func answerRequest(botKey: String, requestId: String, shown: String, answer: WatchCompanion.RequestAnswer) async -> Bool {
-        guard lockScreen.approvals, let app else { return false }
-        return await app.needsYou.answerFromLiveActivity(botKey: BotKey(rawValue: botKey), requestId: requestId,
-                                                        shown: shown, answer: answer, workspaces: Array(app.workspaces.values))
+    func answerRequest(_ reference: RequestReference, shown: String, selection: RequestSelection) async -> RequestActivityAttributes.ContentState.Outcome? {
+        guard lockScreen.approvals, !isPairing, let app else { return nil }
+        guard let row = await app.needsYou.resolveRequest(reference, workspaces: Array(app.workspaces.values)),
+              row.state == "open" else { return .noLongerWaiting }
+        return await app.needsYou.answerNativeRequest(reference, selection: selection, shown: shown)
     }
 
     /// The calling bot's chat in the app, when a gateway's Bot Mode lists a bot of that profile: its waiting approval

@@ -1,4 +1,5 @@
 import Foundation
+import HermesActivityKit
 import HermesKit
 import Observation
 import SwiftUI
@@ -481,6 +482,8 @@ final class ConversationModel: Identifiable {
     private(set) var waitingApprovals: [ApprovalRequest] = []
     /// The waiting item the person stepped to in the dock (`WaitingItem.id`); the first when it's gone.
     var shownWaitingID: String?
+    var ledgerClarification: NeedsYouFeed.NativeClarification?
+    var ledgerApproval: NeedsYouFeed.NativeApproval?
     /// Live states from `connection.update`, by op id then target name.
     private(set) var connectionStates: [String: [String: String]] = [:]
     /// "Allow everything in this chat" (the gateway's session `yolo`).
@@ -6406,6 +6409,10 @@ extension ConversationModel {
 
     private func addReceipt(_ text: String, symbol: String) {
         addReceipt(Notice(id: "receipt-\(UUID().uuidString)", kind: "receipt:\(symbol)", text: text))
+    }
+
+    func recordRequestOutcome(_ outcome: RequestActivityAttributes.ContentState.Outcome) {
+        addReceipt(RequestActivityPresentation.finalLine(outcome, answeredBy: nil), symbol: "checkmark.circle")
     }
 
     private func addReceipt(_ notice: Notice) {

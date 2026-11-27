@@ -3,6 +3,37 @@ import Testing
 @testable import HermesKit
 
 @Suite struct RequestLedgerTests {
+    @Test func nativeApprovalUsesCanonicalPromptIdentityAndOfferedChoices() throws {
+        let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
+            {"request_id":"native-id","session_id":"session-1","profile":"default","kind":"approval","state":"open","created_at":2}
+            """)))
+        let snapshot = try #require(JSONValue.parse("""
+            {"session_id":"session-1","execution_generation":7,"prompts":[
+              {"prompt_id":"different","kind":"approval","execution_generation":7,"command":"git status","choices":["deny"]},
+              {"prompt_id":"native-id","kind":"approval","execution_generation":7,"command":"git status","choices":["once","deny"]}
+            ]}
+            """))
+        let approval = try #require(row.approval(in: snapshot))
+        #expect(approval.id == "native-id")
+        #expect(approval.executionGeneration == 7)
+        #expect(approval.command == "git status")
+        #expect(approval.choices == [.once, .deny])
+        #expect(row.nativeApproval(in: snapshot, generation: 7)?.isPlainCommand == false)
+        #expect(row.nativeApproval(in: snapshot, generation: 6) == nil)
+        #expect(row.legacyApproval(in: snapshot) == nil)
+
+        let prompt = try #require(snapshot["prompts"]?.arrayValue?.last)
+        func live(_ session: String, _ generation: Double, _ prompts: [JSONValue]) -> JSONValue {
+            .object(["session_id": .string(session), "execution_generation": .number(generation), "prompts": .array(prompts)])
+        }
+        #expect(row.approval(in: live("wrong-session", 7, [prompt])) == nil)
+        #expect(row.approval(in: live("session-1", 6, [prompt])) == nil)
+        #expect(row.approval(in: live("session-1", 7.5, [prompt])) == nil)
+        #expect(row.approval(in: live("session-1", 7, [prompt, prompt])) == nil)
+        #expect(row.approval(in: live("session-1", 7, [])) == nil)
+        #expect(row.approval(in: .object(["prompts": .array([prompt])])) == nil)
+    }
+
     @Test func approvalReadsSafetyFromTheExactLiveFrame() throws {
         let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
             {"ledger_id":"target","request_id":"srq-target","profile":"default","kind":"approval","state":"open","created_at":2}

@@ -480,16 +480,34 @@ Rules:
 **Hermes Neo (iPhone).** Settings → Requests → **Requests on this phone** opts in to a
 request-only Live Activity from the paired box. This does not turn on general chat alerts,
 the always-on Bot activity, or a separate call activity. Tap the activity or a box request
-alert to open the Bot's chat, or Needs You if the chat cannot be identified. Box alerts
-open the app because their shared APNs category cannot certify the exact request. Live
-Activity answers require the experimental flag and an exact, still-open session request
-whose content matches what was shown. Actual delivery requires the box producer to support
-the official Agent prompt hooks; with general notifications off, the current box sends
-alerts only as part of a request Live Activity, not as a standalone fallback.
+alert to open its chat, or Needs You if the chat cannot be identified. Alert actions appear
+on the expanded notification. Those and the Live Activity actions require
+`NotificationCatalog.lockScreenAnswersEnabled`, off by default pending a physical iPhone
+test. Approval buttons appear only for a Box-certified plain command that fits in full.
+Clarification offers the single-select choices when they all fit, plus **Type an answer**,
+which opens the same request in its chat. Free-text, multi-select and longer choice lists
+open the app instead.
+
+An answerable native Box payload supplies `requestId` (the gateway's `prompt_id`),
+`sessionId`, and `executionGeneration`. Answerable approvals also supply
+`approvalKind: "command"` and the full, untruncated `command`. The current Box
+cannot certify an ordinary command from official main, so approvals arrive as
+`restricted` without answer identity. The tap looks up the unique matching ledger
+row and opens that request's card, or Needs You if it cannot find the row.
+Neo resumes the exact session on its signed-in
+gateway socket without loading the transcript, checks the live prompt and displayed
+content, then calls `approval.respond` or `clarify.respond` on that same connection.
+Frame clarifications with a session and an exact `srq-` ID need no generation:
+Neo verifies the live question and uses a frame response. If the Box omits
+the session and choice fields, the notification opens the app instead.
+There is no Box answer endpoint. An expired or replaced request is not retried against
+another prompt.
 
 For a local simulator check, launch a Debug build with
-`-NEO_REQUEST_ACTIVITY_DEMO 1`, then lock the phone. This starts a sample request
-activity without contacting a box. `-HERMES_OPEN settings` opens Settings.
+`-NEO_REQUEST_ACTIVITY_DEMO approval` or `-NEO_REQUEST_ACTIVITY_DEMO clarify`, then
+lock the phone. This starts a sample request activity without contacting a box. On the
+Debug simulator only it enables the demo's buttons; use `-NEO_REQUEST_ACTIVITY_DEMO 1`
+to return to the default, open-only state. `-HERMES_OPEN settings` opens Settings.
 
 With official Hermes Agent, approval and clarification notifications open their chat and
 offer no answer buttons, including on the Lock Screen. The answer actions below require an

@@ -4,13 +4,15 @@ public struct RequestReference: Codable, Hashable, Sendable {
     public let botKey: String
     public let requestId: String
     public let sessionId: String
-    public let executionGeneration: Int
+    public let executionGeneration: Int?
+    public var isFrame: Bool { requestId.hasPrefix("srq-") }
 
     public init?(botKey: String, requestId: String, sessionId: String?, executionGeneration: Int?) {
         let bot = botKey.components(separatedBy: "::")
         guard bot.count == 2, bot.allSatisfy(Self.isIdentifier), Self.isIdentifier(requestId),
               let sessionId, Self.isIdentifier(sessionId),
-              let executionGeneration, executionGeneration >= 0 else { return nil }
+              requestId.hasPrefix("srq-") ? requestId.count > 4 && executionGeneration == nil
+                : executionGeneration.map({ $0 >= 0 }) == true else { return nil }
         self.botKey = botKey
         self.requestId = requestId
         self.sessionId = sessionId
@@ -30,7 +32,7 @@ public struct RequestReference: Codable, Hashable, Sendable {
 
 public enum RequestSelection: Sendable, Equatable {
     case approval(allow: Bool)
-    case clarification(String)
+    case clarification(String, questionId: String? = nil)
 }
 
 public enum InlineApproval {

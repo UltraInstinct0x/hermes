@@ -56,6 +56,7 @@
 		272FAD243753B4895A349322 /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 49A26C4633CBC4FA0472A87C /* ActivityKit.framework */; };
 		2781B9569789A85414C563C4 /* Motion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDCAA78C61AB4467E72E5E0F /* Motion.swift */; };
 		279941BF0D0F443A97D97D43 /* NeoCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 669AEBCFF7AF2D84DA942996 /* NeoCallView.swift */; };
+		279BA5474569524B6E90D499 /* HermesBox in Frameworks */ = {isa = PBXBuildFile; productRef = 4D6F5502BCBAE342085256B6 /* HermesBox */; };
 		27DD7454BE98B6CA58EFAAF1 /* CollectionsWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B91EC7B4089F5244378F93 /* CollectionsWidgets.swift */; };
 		2844DE478DC20C304214FB36 /* GetHermesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4253B4FEA70130FBFFE796F8 /* GetHermesView.swift */; };
 		298957203B1DDD4665C6731E /* MarkdownCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A3335030C10A5603C9C2486 /* MarkdownCache.swift */; };
@@ -157,7 +158,7 @@
 		68BADADC2DB85D4B337D7FCD /* PriorityGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = EACF39E5928B0D874FC0CD68 /* PriorityGallery.swift */; };
 		68C181FF81413ABCCCB03A54 /* MacSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB1960694B7A5F36E4F79E1 /* MacSettingsView.swift */; };
 		69003CBCF349B25033273BCC /* NotificationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 062CA9DC49F4E08C7055959E /* NotificationViewController.swift */; };
-		697CA4D1ED8881D3EAC5679B /* HermesActivityKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (ios, ); productRef = 225C2E64805BB42B166595AF /* HermesActivityKit */; };
+		697CA4D1ED8881D3EAC5679B /* HermesActivityKit in Frameworks */ = {isa = PBXBuildFile; productRef = 225C2E64805BB42B166595AF /* HermesActivityKit */; };
 		6A076582013F177C093F67AD /* TalkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F38DF3765EFC53376F148EEE /* TalkView.swift */; };
 		6A33CCD6B11FC60D6A3270AE /* MemoryChatViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00F509B5DBD669F7AA2E736 /* MemoryChatViews.swift */; };
 		6AB666810F7ADC6DBFFD25A7 /* NeoCallKitHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFC702E1F625F6E9F066736 /* NeoCallKitHost.swift */; };
@@ -193,6 +194,7 @@
 		7F168A710171B04B1FD3277A /* Effects.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8186567282DB3FFB0DD3172 /* Effects.swift */; };
 		8114AC295E6F71E005E77AA1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 3BE9E26294360C9EDBE2AC4C /* PrivacyInfo.xcprivacy */; };
 		81AEB5B4B8DB60FCEA0F51FC /* HermesVoiceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4E8D804398B2FA4A08F5813 /* HermesVoiceEngine.swift */; };
+		8502FAB1A46D5D20E636AF60 /* HermesActivityKit in Frameworks */ = {isa = PBXBuildFile; productRef = E1385EEDDC9BA8DDFA5827B5 /* HermesActivityKit */; };
 		86515792C814FCDEAB0CB7DD /* GatewayAccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDE879C0F30313EED6BB8C63 /* GatewayAccessView.swift */; };
 		8663174E02D9BDF1BC270291 /* WelcomeDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11EA5EF1AAB5B7B845A055F6 /* WelcomeDemo.swift */; };
 		86872F98BB9420D033F6D558 /* PairingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EACA4AA1B8418DE48E92A67F /* PairingSheet.swift */; };
@@ -837,6 +839,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				46B8DDFB84FBE174CDDCC7D5 /* HermesPush in Frameworks */,
+				279BA5474569524B6E90D499 /* HermesBox in Frameworks */,
+				8502FAB1A46D5D20E636AF60 /* HermesActivityKit in Frameworks */,
 				89BD93FD7DE3226482F9F0AF /* UserNotificationsUI.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1850,6 +1854,8 @@
 			name = HermesNotificationContent;
 			packageProductDependencies = (
 				5100437768E2C0FC4BBEAA6A /* HermesPush */,
+				4D6F5502BCBAE342085256B6 /* HermesBox */,
+				E1385EEDDC9BA8DDFA5827B5 /* HermesActivityKit */,
 			);
 			productName = HermesNotificationContent;
 			productReference = 79980A0B9CF4CE8153EC2AA6 /* HermesNotificationContent.appex */;
@@ -3076,6 +3082,10 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = HermesBox;
 		};
+		4D6F5502BCBAE342085256B6 /* HermesBox */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HermesBox;
+		};
 		5100437768E2C0FC4BBEAA6A /* HermesPush */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HermesPush;
@@ -3099,6 +3109,10 @@
 		CD0709194343517D219D7201 /* HermesPush */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HermesPush;
+		};
+		E1385EEDDC9BA8DDFA5827B5 /* HermesActivityKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HermesActivityKit;
 		};
 		F95FD7953BD31137B375C730 /* HermesKit */ = {
 			isa = XCSwiftPackageProductDependency;

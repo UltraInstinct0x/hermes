@@ -17,6 +17,14 @@ public enum NotificationCatalog {
         #endif
     }
 
+    public static var neoLockScreenAnswersEnabled: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        lockScreenAnswersEnabled || PushShared.current.defaults.bool(forKey: "NEO_LOCK_SCREEN_ANSWER_DEMO")
+        #else
+        lockScreenAnswersEnabled
+        #endif
+    }
+
     public enum Category: String, CaseIterable, Sendable {
         case approval = "APPROVAL"
         case question = "QUESTION"
