@@ -1474,6 +1474,12 @@ final class BotRoster {
         return try await socket.request("prompt.submit", submit.params(sessionAuthority: await socket.sessionAuthority), timeout: timeout)
     }
 
+    func allowsPromptPhotos(_ count: Int) async throws -> Bool {
+        if count <= PromptSubmitContract.authorityPhotoLimit { return true }
+        let socket = try await liveSocket()
+        return PromptSubmitContract.allowsPhotoCount(count, sessionAuthority: await socket.sessionAuthority)
+    }
+
     func interruptPrompt(sessionID: String, profile: String?, generation: () async throws -> Int) async throws -> Bool {
         let socket = try await liveSocket()
         let target: Int?

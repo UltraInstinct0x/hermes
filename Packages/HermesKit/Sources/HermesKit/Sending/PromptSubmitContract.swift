@@ -11,6 +11,12 @@ import Foundation
 ///   (`gateway/session_controls.py` `submission`). A repeated id is the same admission, never a
 ///   second turn, so the id is minted once per message and kept for every resend of it.
 public struct PromptSubmitContract: Sendable, Equatable {
+    public static let authorityPhotoLimit = 10
+
+    public static func allowsPhotoCount(_ count: Int, sessionAuthority: Bool) -> Bool {
+        !sessionAuthority || count <= authorityPhotoLimit
+    }
+
     public var sessionID: String
     public var text: String
     public var profile: String?

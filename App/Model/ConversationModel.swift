@@ -3239,6 +3239,17 @@ final class ConversationModel: Identifiable {
             var sent = false
             do {
                 let runtime = try await ensureRuntime()
+                guard try await roster.allowsPromptPhotos(item.images.count) else {
+                    expectedFromGateway.removeAll { $0.text == item.line }
+                    var held = item
+                    held.isHeld = true
+                    animateRows {
+                        gatewayHeld.release(item.line)
+                        queue.append(held)
+                    }
+                    banner = Self.promptPhotoLimitError
+                    return
+                }
                 stagedOn = runtime
                 for (index, image) in item.images.enumerated() {
                     staged.staged(try await roster.request("image.attach_bytes", mediaParams(runtime: runtime, [
@@ -3303,6 +3314,10 @@ final class ConversationModel: Identifiable {
         params["session_id"] = .string(runtime)
         if let gatewayProfile { params["profile"] = .string(gatewayProfile) }
         return params
+    }
+
+    private static var promptPhotoLimitError: HermesError {
+        .invalidResponse(String(localized: "Send up to \(PromptSubmitContract.authorityPhotoLimit) photos per message. Remove some photos and try again."))
     }
 
     /// A message the gateway holds: shown in the tray until its turn starts. `item` is the whole
@@ -5270,6 +5285,11 @@ extension ConversationModel {
                 }
                 guard await roster.untilConnected() else { throw CancellationError() }
                 var runtime = try await ensureRuntime()
+                guard try await roster.allowsPromptPhotos(images.count) else {
+                    isBotTurnOpen = false
+                    restoreDraft(text: text, images: images, files: files, error: Self.promptPhotoLimitError)
+                    return
+                }
                 if isBotChat, ["/new", "/reset", "/compact", "/compress"].contains(command) {
                     endDelivery()
                     try await compactBotChat(runtime: runtime, wasReset: command == "/new" || command == "/reset")

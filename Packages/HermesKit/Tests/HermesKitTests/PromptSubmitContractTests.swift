@@ -56,6 +56,12 @@ struct PromptSubmitContractTests {
         #expect(legacy["attachments"] == nil)
     }
 
+    @Test func onlyAuthorityPromptsRejectMoreThanTenPhotos() {
+        #expect(PromptSubmitContract.allowsPhotoCount(10, sessionAuthority: true))
+        #expect(!PromptSubmitContract.allowsPhotoCount(11, sessionAuthority: true))
+        #expect(PromptSubmitContract.allowsPhotoCount(11, sessionAuthority: false))
+    }
+
     @Test func eachMessageMintsItsOwnID() {
         let first = PromptSubmitContract(sessionID: "rt-1", text: "Hi")
         let second = PromptSubmitContract(sessionID: "rt-1", text: "Hi")
