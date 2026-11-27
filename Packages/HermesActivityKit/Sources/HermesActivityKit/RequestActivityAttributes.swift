@@ -36,6 +36,10 @@ public struct RequestActivityAttributes: Codable, Hashable, Sendable {
 
         public var botKey: String
         public var requestId: String
+        public var sessionId: String?
+        public var executionGeneration: Int?
+        public var command: String?
+        public var approvalKind: String?
         public var botName: String
         public var style: Style
         /// The command (approval) or the question, already clipped. Never set for `computerOnly`.
@@ -59,10 +63,15 @@ public struct RequestActivityAttributes: Codable, Hashable, Sendable {
         public init(
             botKey: String, requestId: String, botName: String, style: Style, detail: String = "", toolName: String? = nil,
             deadline: Date? = nil, since: Date, choices: [String] = [], needsApp: Bool = false, questionId: String? = nil,
-            moreWaiting: Int = 0, outcome: Outcome? = nil, answeredBy: String? = nil
+            moreWaiting: Int = 0, outcome: Outcome? = nil, answeredBy: String? = nil,
+            sessionId: String? = nil, executionGeneration: Int? = nil, command: String? = nil, approvalKind: String? = nil
         ) {
             self.botKey = botKey
             self.requestId = requestId
+            self.sessionId = sessionId
+            self.executionGeneration = executionGeneration
+            self.command = command
+            self.approvalKind = approvalKind
             self.botName = botName
             self.style = style
             self.detail = detail

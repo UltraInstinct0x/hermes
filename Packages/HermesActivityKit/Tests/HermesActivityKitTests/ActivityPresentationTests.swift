@@ -175,16 +175,45 @@ struct ActivityPresentationTests {
     // MARK: links and the content state
 
     @Test func onlyAnExactLiveRequestInAnExperimentalBuildOffersAnswers() {
-        var state = approval(detail: "git status")
+        var state = approval(deadline: nil, detail: "git status")
         state.requestId = "srq-a12345678901"
+        #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.openToAnswer])
+        state.sessionId = "session-1"
+        state.executionGeneration = 8
+        state.command = "git status"
+        state.approvalKind = "command"
         let live = RequestActivityPresentation(state)
         #expect(live.actions(lockScreenAnswersEnabled: true, isStale: false) == [.approve, .deny])
         #expect(live.actions(lockScreenAnswersEnabled: false, isStale: false) == [.openToAnswer])
         #expect(live.actions(lockScreenAnswersEnabled: true, isStale: true) == [.openToAnswer])
         state.requestId = "a12345678901b12345678901c1234567"
+        #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.approve, .deny])
+        state.approvalKind = "restricted"
         #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.openToAnswer])
         state.outcome = .expired
         #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false).isEmpty)
+    }
+
+    @Test func aSingleChoiceQuestionAlwaysOffersTyping() {
+        var state = approval(deadline: nil, detail: "Which color?")
+        state.style = .question
+        state.sessionId = "session-1"
+        state.executionGeneration = 1
+        state.choices = ["Red", "Blue"]
+        state.questionId = "color"
+        #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false)
+            == [.choice(index: 0, label: "Red"), .choice(index: 1, label: "Blue"), .typeAnAnswer])
+        state.needsApp = true
+        #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.typeAnAnswer])
+        state.choices = []
+        #expect(RequestActivityPresentation(state).actions(lockScreenAnswersEnabled: true, isStale: false) == [.typeAnAnswer])
+    }
+
+    @Test func aCardLinkRoundTripsTheWholeReference() throws {
+        let ref = try #require(RequestReference(botKey: "oracle::hermes", requestId: "native-id", sessionId: "session-1", executionGeneration: 0))
+        let link = ActivityLink.request(ref)
+        #expect(ActivityLink(url: link.url) == link)
+        #expect(ActivityLink(url: URL(string: "hermesneo://request-card?key=oracle::hermes&request=native-id")!) == nil)
     }
 
     @Test func linksRoundTripAndForeignURLsAreIgnored() {

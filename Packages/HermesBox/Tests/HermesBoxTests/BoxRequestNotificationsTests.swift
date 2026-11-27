@@ -1,4 +1,5 @@
 import Foundation
+import HermesActivityKit
 import Testing
 
 @testable import HermesBox
@@ -37,5 +38,39 @@ struct BoxRequestNotificationsTests {
         // box/bff/push-planner.mjs CATEGORIES
         #expect(BoxRequestNotifications.approvalCategory == "hermes.request.approval")
         #expect(BoxRequestNotifications.questionCategory == "hermes.request.question")
+    }
+
+    @Test func onlyExactPlainCommandsCanBeAnswered() throws {
+        var payload = alert
+        payload["sessionId"] = "session-1"
+        payload["executionGeneration"] = 7
+        payload["command"] = "git status"
+        let ref = try #require(RequestReference(botKey: "oracle::hermesbot", requestId: "req-9",
+                                                 sessionId: "session-1", executionGeneration: 7))
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.approveAction, answersEnabled: true) == nil)
+        payload["approvalKind"] = "command"
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.approveAction) == nil)
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.approveAction, answersEnabled: true)
+            == .answer(ref, .approval(allow: true), shown: "git status"))
+        payload["approvalKind"] = "restricted"
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.denyAction, answersEnabled: true) == nil)
+    }
+
+    @Test func nativeQuestionChoicesAndTypingMatchTheDisplayedActions() throws {
+        var payload = alert
+        payload["aps"] = ["category": BoxRequestNotifications.questionCategory]
+        payload["sessionId"] = "session-1"
+        payload["executionGeneration"] = 7
+        payload["prompt"] = "Which color?"
+        payload["choices"] = ["Red", "Blue"]
+        payload["needsApp"] = false
+        let ref = try #require(RequestReference(botKey: "oracle::hermesbot", requestId: "req-9",
+                                                 sessionId: "session-1", executionGeneration: 7))
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: "hermes.request.choice.1", answersEnabled: true)
+            == .answer(ref, .clarification("Blue"), shown: "Which color?"))
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: "hermes.request.choice.2", answersEnabled: true) == nil)
+        payload["needsApp"] = true
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.typeAction, answersEnabled: true) == .type(ref))
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: "hermes.request.choice.1", answersEnabled: true) == nil)
     }
 }

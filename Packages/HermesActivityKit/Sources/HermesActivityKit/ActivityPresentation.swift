@@ -13,6 +13,7 @@ public struct RequestActivityPresentation: Equatable, Sendable {
         case choice(index: Int, label: String)
         /// Free text, many choices or a multi-select: only the app can answer. A link, not a button.
         case openToAnswer
+        case typeAnAnswer
     }
 
     /// The most the phone shows of a command or a question (the accepted notification wording, S18 D16).
@@ -128,18 +129,23 @@ public struct RequestActivityPresentation: Equatable, Sendable {
 
     // MARK: buttons
 
-    public static func isExactRequestID(_ id: String) -> Bool {
-        id.hasPrefix("srq-") && id.utf8.count == 16
-            && id.utf8.dropFirst(4).allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
-    }
-
-    public func actions(lockScreenAnswersEnabled: Bool, isStale: Bool) -> [Action] {
+    public func actions(lockScreenAnswersEnabled: Bool, isStale: Bool, now: Date = .now) -> [Action] {
         guard state.outcome == nil, state.style != .computerOnly else { return [] }
-        guard lockScreenAnswersEnabled, !isStale, Self.isExactRequestID(state.requestId) else { return [.openToAnswer] }
+        guard lockScreenAnswersEnabled, !isStale,
+              state.deadline.map({ $0 > now }) ?? true,
+              RequestReference(state) != nil else { return [.openToAnswer] }
         if state.style == .approval {
-            let command = state.detail
-            guard !command.isEmpty, command.count <= 40, command == Self.clip(command, 40),
-                  command.utf8.allSatisfy({ (32...126).contains($0) }) else { return [.openToAnswer] }
+            guard state.approvalKind == "command",
+                  let command = state.command, InlineApproval.showsWholeCommand(command) else { return [.openToAnswer] }
+        }
+        if state.style == .question {
+            guard !state.needsApp,
+                  !state.detail.isEmpty, state.detail.count <= Self.detailLimit,
+                  !state.choices.isEmpty, state.choices.count <= Self.maxChoiceButtons,
+                  Set(state.choices).count == state.choices.count,
+                  state.choices.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            else { return [.typeAnAnswer] }
+            return state.choices.enumerated().map { .choice(index: $0.offset, label: $0.element) } + [.typeAnAnswer]
         }
         return actions
     }
@@ -173,6 +179,7 @@ public struct RequestActivityPresentation: Equatable, Sendable {
         case .deny: Self.denyTitle
         case .choice(_, let label): label
         case .openToAnswer: Self.openToAnswerTitle
+        case .typeAnAnswer: "Type an answer"
         }
     }
 
@@ -182,6 +189,7 @@ public struct RequestActivityPresentation: Equatable, Sendable {
         case .deny: "Deny. \(state.botName) will not run this command."
         case .choice(_, let label): "Answer \(label)"
         case .openToAnswer: "Open Hermes Neo to answer"
+        case .typeAnAnswer: "Open Hermes Neo to type an answer"
         }
     }
 
