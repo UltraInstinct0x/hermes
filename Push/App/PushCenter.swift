@@ -638,9 +638,12 @@ final class PushCenter {
         for gateway in shared.gateways.values {
             if let slot = gateway.slot { slots[slot] = gateway.name }
         }
-        UNUserNotificationCenter.current().setNotificationCategories(
-            NotificationCatalog.categories(slots: slots, questionChoices: questionChoices)
-        )
+        var categories = NotificationCatalog.categories(slots: slots, questionChoices: questionChoices)
+        #if os(iOS)
+        // Hermes Neo: the box's open-only request alerts, beside upstream's own.
+        categories.formUnion(NeoNotificationRouting.categories)
+        #endif
+        UNUserNotificationCenter.current().setNotificationCategories(categories)
     }
 
     // MARK: - Where the person is

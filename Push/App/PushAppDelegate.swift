@@ -15,6 +15,8 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         PushCenter.shared.didRegister(deviceToken: deviceToken)
+        // Hermes Neo: the same token goes to the owner's box, for requests and Live Activities (App/Calls).
+        NeoBox.shared.deviceTokenReceived(deviceToken)
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: any Error) {

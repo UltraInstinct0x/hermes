@@ -57,6 +57,9 @@ packages:
   # Hermes Neo: the bots' animated avatar (bloub), vendored from Hermes Bot (Packages/HermesAvatar/VENDORED.md).
   HermesAvatar:
     path: Packages/HermesAvatar
+  # Hermes Neo: the box's Live Activity types, shared by the app and the widget extension.
+  HermesActivityKit:
+    path: Packages/HermesActivityKit
   # Mac-only support (Sparkle), linked only into macOS builds.
   HermesMacSupport:
     path: Packages/HermesMacSupport
@@ -75,6 +78,8 @@ targets:
       - path: Push/App
         excludes: ["*.plist", "*.entitlements"]
       - path: Push/Shared
+      # Hermes Neo: the Lock Screen buttons of the box's Live Activities (run in the app's process).
+      - path: Neo/Shared
     dependencies:
       - package: HermesKit
         product: HermesKit
@@ -87,6 +92,9 @@ targets:
         destinationFilters: [iOS]
       - package: HermesAvatar
         product: HermesAvatarUI
+        destinationFilters: [iOS]
+      - package: HermesActivityKit
+        product: HermesActivityKit
         destinationFilters: [iOS]
       - target: HermesNotificationService
         destinationFilters: [iOS]
@@ -287,9 +295,14 @@ targets:
       - path: Push/Extensions
       - path: App/Design/Palette.swift
       - path: App/Design/HermesMarkPath.swift
+      # Hermes Neo: the box's Live Activities and their buttons.
+      - path: Neo/Activities
+      - path: Neo/Shared
     dependencies:
       - package: HermesKit
         product: HermesPush
+      - package: HermesActivityKit
+        product: HermesActivityKit
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
       - sdk: ActivityKit.framework

@@ -54,6 +54,43 @@ struct NeoCallsSettingsSection: View {
         } footer: {
             Text(CallOwnerCopy.footnote)
         }
+        NeoRequestsSettingsSection(box: box)
+    }
+}
+
+/// Settings → Requests: approval and question updates from the box, separate from calls and chat notifications.
+struct NeoRequestsSettingsSection: View {
+    let box: NeoBox
+
+    var body: some View {
+        let push = box.push
+        Section {
+            Toggle(isOn: Binding(get: { box.lockScreen.approvals }, set: { on in Task { await box.setRequestsEnabled(on) } })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Requests on this phone")
+                    Text("See approvals and questions on the Lock Screen.").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .task { await box.refreshPush() }
+            if box.lockScreen.approvals {
+                if let failure = box.pairingFailure {
+                    NeoFailureRow(failure: failure) { Task { await box.setRequestsEnabled(true) } }
+                } else if push.serverEnabled == false {
+                    Text("Your box has push turned off.").font(.footnote)
+                    Button("Check again") { Task { await box.refreshPush() } }
+                } else if push.diagnostics.notificationsAllowed == false {
+                    Text("Notifications are off for Hermes Neo. Requests still appear in the app.").font(.footnote)
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                } else if let error = push.diagnostics.lastError {
+                    Text(error).font(.footnote)
+                    Button("Check again") { Task { await box.setRequestsEnabled(true) } }
+                }
+            }
+        } header: {
+            Text("Requests")
+        }
     }
 }
 
