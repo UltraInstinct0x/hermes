@@ -21,9 +21,10 @@ struct NeoRequestLiveActivity: Widget {
                         .font(.title2)
                         .accessibilityHidden(true)
                 }
-                DynamicIslandExpandedRegion(.trailing) {
+                DynamicIslandExpandedRegion(.trailing, priority: 1) {
                     RequestCountdownView(presentation: presentation)
                         .font(.title3.monospacedDigit())
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text(presentation.title)
