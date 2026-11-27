@@ -528,7 +528,8 @@ else asks it for a role and gets an `AudioLease`, whose events say when to pause
 stop.
 
 - **Roles, in priority order:** Talk > recording a voice message > Dictation > Listen > playing
-  a voice message > Hey Hermes listening (§4.6).
+  a voice message > Hey Hermes listening (§4.6). Hermes Neo adds a call from a Bot above Talk
+  (`.call`, rung through CallKit; its session is CallKit's to activate: `docs/neo-calls.md` §1).
 - **A higher role pauses or stops a lower one** (`AudioRole.whenPreempted(by:)`):
   - Listen and playback pause for a recording or dictation, and carry on after; they stop when a
     call starts;

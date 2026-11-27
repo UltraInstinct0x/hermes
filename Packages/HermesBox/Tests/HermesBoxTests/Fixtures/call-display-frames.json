@@ -1,0 +1,65 @@
+{
+  "note": "Shared samples: box/call-hub/tests/display-fixture.test.mjs runs the hub's validateDisplayFrame over them, CallDisplayTests.swift decodes the same frames. valid is the hub's verdict; swift.decodes is what CallInbound.parse yields; swift.secure is whether the phone would open or load the link.",
+  "frames": [
+    {
+      "name": "markdown note",
+      "valid": true,
+      "swift": { "decodes": "display", "kind": "markdown", "secure": false },
+      "frame": { "type": "call.display", "call_id": "11111111-2222-4333-8444-555555555555", "item": { "id": "00000000-0000-4000-8000-000000000001", "kind": "markdown", "title": "Service summary", "body": "**bff** is up, see `status`" }, "at": 1700000000000 }
+    },
+    {
+      "name": "https link",
+      "valid": true,
+      "swift": { "decodes": "display", "kind": "url", "secure": true },
+      "frame": { "type": "call.display", "call_id": "11111111-2222-4333-8444-555555555555", "item": { "id": "00000000-0000-4000-8000-000000000002", "kind": "url", "title": "Report", "url": "https://example.com/report?id=7" }, "at": 1700000000001 }
+    },
+    {
+      "name": "https image",
+      "valid": true,
+      "swift": { "decodes": "display", "kind": "image", "secure": true },
+      "frame": { "type": "call.display", "call_id": "11111111-2222-4333-8444-555555555555", "item": { "id": "00000000-0000-4000-8000-000000000003", "kind": "image", "title": "Chart", "url": "https://cdn.example.org/chart.png" }, "at": 1700000000002 }
+    },
+    {
+      "name": "clear",
+      "valid": true,
+      "swift": { "decodes": "clear" },
+      "frame": { "type": "call.display.clear", "call_id": "11111111-2222-4333-8444-555555555555", "at": 1700000000003 }
+    },
+    {
+      "name": "http link is refused",
+      "valid": false,
+      "swift": { "decodes": "display", "kind": "url", "secure": false },
+      "frame": { "type": "call.display", "call_id": "11111111-2222-4333-8444-555555555555", "item": { "id": "00000000-0000-4000-8000-000000000004", "kind": "url", "title": "Plain", "url": "http://example.com/" }, "at": 1700000000004 }
+    },
+    {
+      "name": "private address is refused",
+      "valid": false,
+      "swift": { "decodes": "display", "kind": "image", "secure": false },
+      "frame": { "type": "call.display", "call_id": "11111111-2222-4333-8444-555555555555", "item": { "id": "00000000-0000-4000-8000-000000000005", "kind": "image", "title": "Router", "url": "https://192.168.1.5/a.png" }, "at": 1700000000005 }
+    },
+    {
+      "name": "tailnet host is refused",
+      "valid": false,
+      "swift": { "decodes": "display", "kind": "url", "secure": false },
+      "frame": { "type": "call.display", "call_id": "11111111-2222-4333-8444-555555555555", "item": { "id": "00000000-0000-4000-8000-000000000006", "kind": "url", "title": "Box", "url": "https://box.tail1234.ts.net/" }, "at": 1700000000006 }
+    },
+    {
+      "name": "credentials in the link are refused",
+      "valid": false,
+      "swift": { "decodes": "display", "kind": "url", "secure": false },
+      "frame": { "type": "call.display", "call_id": "11111111-2222-4333-8444-555555555555", "item": { "id": "00000000-0000-4000-8000-000000000007", "kind": "url", "title": "Login", "url": "https://user:pw@example.com/" }, "at": 1700000000007 }
+    },
+    {
+      "name": "unknown kind is refused",
+      "valid": false,
+      "swift": { "decodes": "other" },
+      "frame": { "type": "call.display", "call_id": "11111111-2222-4333-8444-555555555555", "item": { "id": "00000000-0000-4000-8000-000000000008", "kind": "video", "title": "Clip", "url": "https://example.com/a.mp4" }, "at": 1700000000008 }
+    },
+    {
+      "name": "markdown without a body is refused",
+      "valid": false,
+      "swift": { "decodes": "other" },
+      "frame": { "type": "call.display", "call_id": "11111111-2222-4333-8444-555555555555", "item": { "id": "00000000-0000-4000-8000-000000000009", "kind": "markdown", "title": "Empty" }, "at": 1700000000009 }
+    }
+  ]
+}

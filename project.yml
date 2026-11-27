@@ -1,6 +1,7 @@
 name: Hermes
 options:
-  bundleIdPrefix: co.caffeinatedcode
+  # Fork (UltraInstinct0x): own team and bundle prefix so it installs beside the official app.
+  bundleIdPrefix: dev.supersaiyan
   deploymentTarget:
     iOS: "26.0"
     macOS: "26.0"
@@ -12,26 +13,28 @@ options:
 
 settings:
   configs:
+    # Hermes Neo (UltraInstinct0x fork): one identity for Debug and Release, so a build from Xcode and
+    # one from the command line are the same app on the phone. Only the push environment differs.
     Debug:
       HERMES_APS_ENVIRONMENT: development
-      HERMES_APP_BUNDLE_ID: co.caffeinatedcode.hermes.dev
-      HERMES_APP_GROUP: group.co.caffeinatedcode.hermes.dev
-      HERMES_KEYCHAIN_GROUP: co.caffeinatedcode.hermes.dev.push
+      HERMES_APP_BUNDLE_ID: dev.supersaiyan.hermesneo
+      HERMES_APP_GROUP: group.dev.supersaiyan.hermesneo
+      HERMES_KEYCHAIN_GROUP: dev.supersaiyan.hermesneo.push
     Release:
       HERMES_APS_ENVIRONMENT: production
-      HERMES_APP_BUNDLE_ID: co.caffeinatedcode.hermes
-      HERMES_APP_GROUP: group.co.caffeinatedcode.hermes
-      HERMES_KEYCHAIN_GROUP: co.caffeinatedcode.hermes.push
+      HERMES_APP_BUNDLE_ID: dev.supersaiyan.hermesneo
+      HERMES_APP_GROUP: group.dev.supersaiyan.hermesneo
+      HERMES_KEYCHAIN_GROUP: dev.supersaiyan.hermesneo.push
   base:
     # The shared Keychain group's team prefix (the App ID prefix is the team id).
-    HERMES_KEYCHAIN_PREFIX: 29ZNGBT83H.
+    HERMES_KEYCHAIN_PREFIX: GM3SRSD642.
     # The Mac app doesn't use the App Group (local notifications only; see docs).
     "HERMES_APP_GROUP[sdk=macosx*]": ""
     # One version for the app and its extensions (App Store validation requires they match).
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "6.0"
-    DEVELOPMENT_TEAM: 29ZNGBT83H
+    DEVELOPMENT_TEAM: GM3SRSD642
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     SWIFT_STRICT_CONCURRENCY: complete
@@ -48,6 +51,12 @@ settings:
 packages:
   HermesKit:
     path: Packages/HermesKit
+  # Hermes Neo: the owner's box (pairing, calls from bots), ported from the Hermes Bot app.
+  HermesBox:
+    path: Packages/HermesBox
+  # Hermes Neo: the bots' animated avatar (bloub), vendored from Hermes Bot (Packages/HermesAvatar/VENDORED.md).
+  HermesAvatar:
+    path: Packages/HermesAvatar
   # Mac-only support (Sparkle), linked only into macOS builds.
   HermesMacSupport:
     path: Packages/HermesMacSupport
@@ -73,6 +82,12 @@ targets:
         product: HermesPush
       - package: HermesKit
         product: HermesMarkdown
+      - package: HermesBox
+        product: HermesBox
+        destinationFilters: [iOS]
+      - package: HermesAvatar
+        product: HermesAvatarUI
+        destinationFilters: [iOS]
       - target: HermesNotificationService
         destinationFilters: [iOS]
       - target: HermesNotificationContent
@@ -87,7 +102,7 @@ targets:
         product: WebRTC
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: co.caffeinatedcode.hermes
+        PRODUCT_BUNDLE_IDENTIFIER: $(HERMES_APP_BUNDLE_ID)
         PRODUCT_NAME: Hermes
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
@@ -104,7 +119,7 @@ targets:
         # (below). Info.plist's HermesICloudKeyValueSync says which, so it must match the entitlement.
         HERMES_ICLOUD_KEY_VALUE_SYNC: YES
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) HERMES_PUSH"
-        INFOPLIST_KEY_CFBundleDisplayName: Hermes
+        INFOPLIST_KEY_CFBundleDisplayName: Hermes Neo
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         INFOPLIST_KEY_NSHumanReadableCopyright: "© 2026 Caffeinated Code"
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Hermes connects to Hermes Agent gateways running on your local network."
@@ -143,16 +158,16 @@ targets:
         # settings and icon, and the only builds that can bootstrap the demo gateway.
         # Release (TestFlight / App Store) is the real "Hermes" and never touches demo data.
         Debug:
-          PRODUCT_BUNDLE_IDENTIFIER: co.caffeinatedcode.hermes.dev
-          INFOPLIST_KEY_CFBundleDisplayName: Hermes Dev
+          PRODUCT_BUNDLE_IDENTIFIER: $(HERMES_APP_BUNDLE_ID)
+          INFOPLIST_KEY_CFBundleDisplayName: Hermes Neo
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIconDev
           HERMES_URL_SCHEME: hermesapp-dev
           # A Mac Debug build with the iCloud entitlement would need a development profile, which only
           # a developer portal write makes, so it keeps hidden plugins on this Mac.
           "HERMES_ICLOUD_KEY_VALUE_SYNC[sdk=macosx*]": NO
         Release:
-          PRODUCT_BUNDLE_IDENTIFIER: co.caffeinatedcode.hermes
-          INFOPLIST_KEY_CFBundleDisplayName: Hermes
+          PRODUCT_BUNDLE_IDENTIFIER: $(HERMES_APP_BUNDLE_ID)
+          INFOPLIST_KEY_CFBundleDisplayName: Hermes Neo
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
           # iOS releases sign by hand with the App Store profiles (Scripts/release.sh downloads them):
           # the app and its three extensions each have one. The Mac signs by hand with Developer ID
@@ -306,7 +321,7 @@ targets:
       - target: Hermes
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: co.caffeinatedcode.hermes.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: $(HERMES_APP_BUNDLE_ID).uitests
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: UITests/Info.plist
         TEST_TARGET_NAME: Hermes

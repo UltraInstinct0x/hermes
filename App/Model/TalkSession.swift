@@ -1061,6 +1061,14 @@ struct CallRecord: Codable, Identifiable, Hashable {
     /// What was done: Hermes's last reply when it summed up, or Apple Intelligence's summary.
     var summary: String?
     var summaryByDevice = false
+    /// Hermes Neo: the words of a call that didn't run in this chat (a bot's call through the box), shown by
+    /// Transcript on its card. Nil for the app's own calls, whose turns are the chat's rows.
+    var lines: [Line]?
+
+    struct Line: Codable, Hashable {
+        var isUser: Bool
+        var text: String
+    }
 
     var duration: TimeInterval { endedAt.timeIntervalSince(startedAt) }
 }

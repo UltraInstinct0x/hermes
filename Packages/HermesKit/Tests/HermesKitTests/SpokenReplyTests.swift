@@ -70,6 +70,16 @@ struct CallFoldingTests {
     @Test func noCallsNoFolds() {
         #expect(CallFolding.folds([user("u", at: 0)], spans: []) == CallFolding.Folds())
     }
+
+    /// Hermes Neo: a call whose words aren't this chat's rows (a bot's call through the box) still gets its card,
+    /// after the last message from before it ended, and folds nothing.
+    @Test func aCallWithNoRowsInTheChatGetsItsCardWhereItHappened() {
+        let call = UUID()
+        let items = [user("before", at: -60), reply("r0", at: -55), user("after", at: 400)]
+        let folds = CallFolding.folds(items, spans: [.init(id: call, start: start, end: start.addingTimeInterval(120))])
+        #expect(folds.rows.isEmpty)
+        #expect(folds.cardAfter == ["r0": call])
+    }
 }
 
 @Suite("A reply read across settling")

@@ -16,6 +16,9 @@ public enum AudioRole: Int, Sendable, Hashable, Comparable, CaseIterable, Custom
     case recording = 3
     /// Talk, a call with a Bot.
     case talk = 4
+    /// Hermes Neo: a call from a Bot on the owner's box, rung and answered through CallKit
+    /// (`App/Calls`). It outranks Talk, as a phone call would; CallKit activates its session.
+    case call = 5
 
     public static func < (lhs: AudioRole, rhs: AudioRole) -> Bool {
         lhs.rawValue < rhs.rawValue
@@ -24,7 +27,7 @@ public enum AudioRole: Int, Sendable, Hashable, Comparable, CaseIterable, Custom
     /// The microphone is on for this role.
     public var usesMicrophone: Bool {
         switch self {
-        case .talk, .recording, .dictation, .wake: true
+        case .call, .talk, .recording, .dictation, .wake: true
         case .listen, .playback: false
         }
     }
@@ -33,11 +36,11 @@ public enum AudioRole: Int, Sendable, Hashable, Comparable, CaseIterable, Custom
     /// resumes after; a voice message stops when a call starts; dictation stops (its words stay).
     public func whenPreempted(by higher: AudioRole) -> AudioPreemption {
         switch self {
-        case .playback: higher == .talk ? .stop : .pause
-        case .listen: higher == .talk ? .stop : .pause
+        case .playback: higher >= .talk ? .stop : .pause
+        case .listen: higher >= .talk ? .stop : .pause
         case .dictation: .stop
         case .recording: .pause
-        case .talk: .pause
+        case .talk, .call: .pause
         // It listens again when the call, the recording or the reply is over.
         case .wake: .pause
         }
@@ -50,6 +53,7 @@ public enum AudioRole: Int, Sendable, Hashable, Comparable, CaseIterable, Custom
         case .dictation: "dictation"
         case .recording: "recording"
         case .talk: "talk"
+        case .call: "call"
         case .wake: "wake"
         }
     }
@@ -71,12 +75,25 @@ public struct AudioRoleOptions: Sendable, Hashable {
     public var highQualityBluetoothRecording: Bool
     /// Raise to Listen: the phone is at the ear, so play through the receiver.
     public var receiver: Bool
+    /// A call CallKit runs (`.call`): the system activates the session, never the app. Nil for
+    /// everything else.
+    public var systemActivation: SystemActivation?
 
-    public init(prefersSpeaker: Bool = true, highQualityBluetoothRecording: Bool = false, receiver: Bool = false) {
+    public init(
+        prefersSpeaker: Bool = true, highQualityBluetoothRecording: Bool = false, receiver: Bool = false,
+        systemActivation: SystemActivation? = nil
+    ) {
         self.prefersSpeaker = prefersSpeaker
         self.highQualityBluetoothRecording = highQualityBluetoothRecording
         self.receiver = receiver
+        self.systemActivation = systemActivation
     }
+}
+
+/// Where a session the system activates stands: set up but waiting for CallKit's `didActivate`
+/// (category only, no engine), or live (the engine may be prepared and started).
+public enum SystemActivation: String, Sendable, Hashable {
+    case pending, active
 }
 
 /// The audio session a role runs in, described so it can be logged and tested on any platform.
@@ -93,17 +110,29 @@ public struct AudioSessionProfile: Sendable, Hashable, CustomStringConvertible {
     public var options: Set<Option>
     /// Echo cancellation, noise suppression and gain control on the engine's input.
     public var voiceProcessing: Bool
+    /// Non-nil when CallKit, not the app, activates and deactivates the session (`.call`).
+    public var systemActivation: SystemActivation?
 
-    public init(category: Category, mode: Mode, options: Set<Option>, voiceProcessing: Bool) {
+    public init(
+        category: Category, mode: Mode, options: Set<Option>, voiceProcessing: Bool, systemActivation: SystemActivation? = nil
+    ) {
         self.category = category
         self.mode = mode
         self.options = options
         self.voiceProcessing = voiceProcessing
+        self.systemActivation = systemActivation
     }
 
     /// `docs/voice.md` §4.2 (Talk), §2 (recording), §5 (dictation), §3 (Listen), §4.6 (Hey Hermes).
     public static func `for`(_ role: AudioRole, options: AudioRoleOptions = .init()) -> AudioSessionProfile {
         switch role {
+        case .call:
+            // CallKit's own call: no ducking flags (the system handles other audio for a call).
+            AudioSessionProfile(
+                category: .playAndRecord, mode: .voiceChat,
+                options: options.prefersSpeaker ? [.allowBluetoothHFP, .defaultToSpeaker] : [.allowBluetoothHFP],
+                voiceProcessing: true, systemActivation: options.systemActivation ?? .pending
+            )
         case .talk:
             AudioSessionProfile(
                 category: .playAndRecord, mode: .voiceChat,
@@ -144,6 +173,7 @@ public struct AudioSessionProfile: Sendable, Hashable, CustomStringConvertible {
 
     public var description: String {
         let flags = options.map(\.rawValue).sorted().joined(separator: ",")
-        return "\(category.rawValue)/\(mode.rawValue)[\(flags)]\(voiceProcessing ? "+vp" : "")"
+        let system = systemActivation.map { "+system(\($0.rawValue))" } ?? ""
+        return "\(category.rawValue)/\(mode.rawValue)[\(flags)]\(voiceProcessing ? "+vp" : "")\(system)"
     }
 }

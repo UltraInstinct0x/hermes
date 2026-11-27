@@ -13,6 +13,11 @@ struct HermesApp: App {
     #if os(macOS)
     @State private var updater = Updater()
     #endif
+    #if os(iOS)
+    /// Hermes Neo: calls from your bots (`App/Calls`). Made at launch, also a background launch by
+    /// a VoIP push, so PushKit and CallKit are ready before the push is delivered.
+    private let neoBox = NeoBox.shared
+    #endif
     #if HERMES_PUSH
     #if os(iOS)
     @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushDelegate
@@ -97,6 +102,9 @@ struct HermesApp: App {
                 .environment(model)
                 #if os(macOS)
                 .frame(minWidth: 480, minHeight: 520)
+                #endif
+                #if os(iOS)
+                .neoCallCover(model: model)
                 #endif
         }
         #if os(iOS)

@@ -271,7 +271,7 @@ public actor BackendClient {
     }
 
     /// The headers a gateway file needs (`/api/files/stream` takes no token in the URL).
-    func authorizationHeaders() -> [String: String] {
+    public func authorizationHeaders() -> [String: String] {
         switch credential {
         case .sessionToken(let token): ["X-Hermes-Session-Token": token]
         case .cookies(let cookies): ["Cookie": cookies.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: "; ")]

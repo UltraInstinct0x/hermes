@@ -83,16 +83,22 @@ public final class LiveAudioPlatform: AudioPlatform {
             // Haptics and the sounds Talk plays still work while the microphone is on.
             try? session.setAllowHapticsAndSystemSoundsDuringRecording(true)
         }
-        if #available(iOS 27, *) {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-                session.activate(options: []) { _, error in
-                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+        // A CallKit call's session is activated by CallKit (`provider(_:didActivate:)`), never here:
+        // an app that activates it itself gets a silent call.
+        if profile.systemActivation == nil {
+            if #available(iOS 27, *) {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                    session.activate(options: []) { _, error in
+                        if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                    }
                 }
+            } else {
+                try session.setActive(true)
             }
-        } else {
-            try session.setActive(true)
         }
         #endif
+        // Voice processing goes on once the session is live: for CallKit, after `didActivate`.
+        guard profile.systemActivation != .pending else { return }
         try graph.prepare(voiceProcessing: profile.voiceProcessing, usesInput: profile.category == .playAndRecord)
     }
 

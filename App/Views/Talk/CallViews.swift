@@ -137,6 +137,23 @@ struct CallSummaryCard: View {
                     }
                 }
             }
+            // Hermes Neo: a call through the box keeps its own words (they aren't this chat's rows).
+            if showsTurns, let lines = record.lines, !lines.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(line.isUser ? String(localized: "You") : record.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.secondaryText)
+                            Text(line.text)
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.primaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
             HStack(spacing: 6) {
                 Chip(text: record.turns == 1 ? String(localized: "1 turn") : String(localized: "\(record.turns) turns"))
                 if record.approvals > 0 {
