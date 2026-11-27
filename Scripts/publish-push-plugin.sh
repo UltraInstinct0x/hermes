@@ -18,7 +18,9 @@ if git diff --cached --quiet; then
   echo "nothing to publish"
   exit 0
 fi
-git commit -q -m "$MESSAGE"
+# Public commits carry the GitHub noreply address, never a personal email.
+NOREPLY_EMAIL="63316492+UltraInstinct0x@users.noreply.github.com"
+GIT_AUTHOR_EMAIL="$NOREPLY_EMAIL" GIT_COMMITTER_EMAIL="$NOREPLY_EMAIL" git commit -q -m "$MESSAGE"
 git push -q origin HEAD
 echo "published $(git rev-parse --short HEAD) to $REPO"
 # The app installs a pinned commit (AppPlugin.push in HermesKit, docs/plugins.md §7).
