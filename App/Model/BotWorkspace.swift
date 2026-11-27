@@ -98,6 +98,7 @@ final class BotWorkspace: Identifiable {
     let unread: UnreadStore
     /// What they're doing right now (`docs/inbox.md` §2).
     let activity = LiveActivity()
+    var ledgerSources: [LedgerSource] = []
     /// Agent widgets in this gateway's chats (`docs/widgets.md` §4).
     let widgets: WidgetStore
     /// Whether this Hermes keeps a Bot's message to another Bot going when the sender's chat
@@ -846,6 +847,12 @@ final class BotWorkspace: Identifiable {
         } else {
             selection = .session(session.stableID)
         }
+    }
+
+    func openLedgerChat(_ session: HermesSession, profile: String) {
+        list(session)
+        conversation(forKey: session.stableID).scopeToLedgerProfile(profile)
+        selection = .session(session.stableID)
     }
 
     /// Puts a chat opened from elsewhere in the list, in its place by time, unless it's there.
@@ -1600,6 +1607,7 @@ final class BotWorkspace: Identifiable {
     /// reached is offline as of this moment). Only while the connection is being kept.
     private func routeChanged(cameBack: Bool) {
         guard keeper != nil else { return }
+        if cameBack { app?.invalidateLedger() }
         switch connection {
         case .online:
             checkConnectionNow()

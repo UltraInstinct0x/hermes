@@ -933,7 +933,12 @@ final class ConversationModel: Identifiable {
     }
 
     /// The profile gateway calls are scoped to: the Bot, or the gateway's own profile.
-    private var gatewayProfile: String? { botName ?? workspace?.bot.profileName }
+    private var gatewayProfile: String? { botName ?? ledgerProfile ?? workspace?.bot.profileName }
+    private var ledgerProfile: String?
+
+    func scopeToLedgerProfile(_ profile: String) {
+        ledgerProfile = profile
+    }
     /// The profile whose config Turn On Checkpoints writes.
     var gatewayProfileForCheckpoints: String? { gatewayProfile }
     /// The backend this chat's audio goes to (the Bot's voice, Realtime), with its profile.
@@ -1779,8 +1784,8 @@ final class ConversationModel: Identifiable {
 
     /// A page of the stored transcript, from wherever this chat is served.
     private func fetchPage(_ id: String, limit: Int, offset: Int) async throws -> SessionTranscript {
-        if let botName, let roster {
-            return try await roster.transcript(storedSessionID: id, profile: botName, limit: limit, offset: offset)
+        if let profile = botName ?? ledgerProfile, let roster = gatewayRoster {
+            return try await roster.transcript(storedSessionID: id, profile: profile, limit: limit, offset: offset)
         }
         if let client = workspace?.client {
             return try await client.transcript(sessionID: id, limit: limit, offset: offset)

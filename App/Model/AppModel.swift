@@ -15,6 +15,8 @@ import UIKit
 final class AppModel {
     private(set) var bots: [BotConfiguration] = []
     private(set) var workspaces: [UUID: BotWorkspace] = [:]
+    let needsYou = NeedsYouFeed()
+    @ObservationIgnored private var ledgerRefresh: Task<Void, Never>?
     /// Which gateway each window shows (`docs/connecting-and-voice.md` §8).
     private(set) var windows = WindowGateways()
     /// The gateway used last: the one app-wide places use (Settings, Talk, the menu bar extra,
@@ -31,6 +33,9 @@ final class AppModel {
     /// Removed gateways' web data, deleted at launch once no web view can use it.
     @ObservationIgnored private let retiredWebStores = RetiredWebStores()
     @ObservationIgnored private var webStoreSweep: Task<Void, Never>?
+    #if os(iOS)
+    @ObservationIgnored private let watchRelay = WatchPhoneRelay()
+    #endif
 
     init(store: BotStore = .standard(identities: AppModel.certificateStore)) {
         self.store = store
@@ -70,6 +75,7 @@ final class AppModel {
         watchActivation()
         #else
         watchProtectedData()
+        watchRelay.start(model: self)
         #endif
     }
 
@@ -81,6 +87,18 @@ final class AppModel {
 
     var currentWorkspace: BotWorkspace? {
         selectedBotID.flatMap { workspaces[$0] }
+    }
+
+    func refreshLedger() async {
+        await needsYou.refresh(bots.compactMap { workspaces[$0.id] })
+    }
+
+    func invalidateLedger() {
+        ledgerRefresh?.cancel()
+        ledgerRefresh = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            await self?.refreshLedger()
+        }
     }
 
     /// An app-wide switch (a notification, a link, a new gateway): the window that was active
@@ -431,6 +449,10 @@ final class AppModel {
         let certificate = bots.first { $0.id == botID }?.access?.clientCertificate?.fingerprint
         updated.removeAll { $0.id == botID }
         try store.save(updated)
+        needsYou.forgetGateway(botID)
+        #if os(iOS)
+        watchRelay.forgetGateway(botID)
+        #endif
         try? store.removeAPIKey(for: botID)
         try? store.setBackendCredential(nil, for: botID)
         GatewayAccessRegistry.shared.forget(botID)
@@ -646,6 +668,7 @@ final class AppModel {
     // MARK: - Lifecycle
 
     func didBecomeActive() {
+        invalidateLedger()
         let returning = backgroundedAt.map { Date.now.timeIntervalSince($0) > 5 } ?? false
         backgroundedAt = nil
         let shown = shownWorkspaces
@@ -665,6 +688,7 @@ final class AppModel {
 
     /// Every window is gone or hidden: Bot rosters stop polling until the app is back.
     func didEnterBackground() {
+        ledgerRefresh?.cancel()
         backgroundedAt = .now
         #if os(iOS)
         // iOS suspends the app: Hermes is told its browser went away rather than waiting it out

@@ -69,6 +69,8 @@ Settings in `config.yaml` under `plugins.entries.hermes-app-push.settings`: `rel
 `https://push.hermesapp.dev`), `gateway_name` (default the machine's host name) and the watcher's
 `card_poll_seconds`, `card_idle_poll_seconds` and `tidy_poll_seconds` ([plugins.md](plugins.md) §5.3).
 Its state lives in `<Hermes root>/plugin-data/hermes-app-push`.
+On a box with the loopback adapter, set `relay_url` to the adapter's address; it uses the same
+relay API. There is no change to the default relay or to legacy routing.
 
 ### 1.2 Registration
 
@@ -221,7 +223,7 @@ read them, and they reach Apple through our relay."
 | Approval: `pre_approval_request` on the gateway or transport surface, or a card fill's `vault-payment` (plugin 1.4.3; not a coalesced follower) | "Hermes needs your OK" ("Ada needs your OK" for a Bot) · chat title · "Run `<command>` on `<gateway>`?" (one line, clipped at 80) | `APPROVAL`: Allow Once, Deny (destructive), More Options…. `OPEN` (no actions) for a command Hermes's safety check flagged (`smart_denied`), a card fill ("Fill your card on amazon.com?", surface `vault-payment` or a "Fill payment card '…'" command, [web.md](web.md) §4.3), and on the Mac for one the banner can't show whole | Time Sensitive | session | `notificationApproval`, `notificationExpanded`, `notificationActions` |
 | "Save to memory?" (an approval whose description starts with "Save to memory", Ask Before Saving on) | "Hermes wants to remember something" · chat · the entry | `MEMORY`: Save, Don't Save | Active | session | `notificationApproval` with memory copy ([memory.md](memory.md)) |
 | Question: `on_human_input_request` `clarify` | "Hermes has a question" · chat · the first question | `QUESTION`: up to 3 choices (for a single, single-select question), Reply… | Time Sensitive | session | `notificationQuestion`, `notificationExpandedQuestion`, `notificationActionsQuestion`, `notificationReplyField` |
-| Password: `on_human_input_request` for `sudo`, secrets and other value prompts | "Hermes needs a password" · chat · "For `<command>`" for sudo (never the value) | `PASSWORD` (`OPEN` on the wire): no actions; opens the chat with its card docked | Time Sensitive | session | `notificationApproval` text variant |
+| Password: `on_human_input_request` for `sudo`, secrets and other value prompts | "Hermes needs a password" · chat · "Open Hermes to enter it." (never the value or sudo context) | `PASSWORD` (`OPEN` on the wire): no actions; opens the chat with its card docked | Time Sensitive | session | `notificationApproval` text variant |
 | Turn finished: `pre_llm_call` → `on_session_end`, completed with text, when the turn ran at least the Replies threshold (30 s) or this device was watching the chat when it started and has left since | chat title (or the Bot) · the reply's first 4 lines | `REPLY`: Reply… | Active | session | `notification` |
 | Scheduled task delivered (`deliver: apppush`, `failure_deliver: apppush:fail`) | task name · "Failed" when it failed · the result's first lines | `TASK`: Open | Passive (Active if failed) | `task:<job id>` | `notificationTask`, `notificationTaskFailed` |
 | Bot message in a group chat: `on_room_member_activity` `message.delta`, settled after 5 s of quiet | Bot name · room · the message's first lines | `MESSAGE`: Reply… (a communication notification) | Active | `room:<id>` | `notificationBot` |
@@ -463,6 +465,12 @@ Rules:
 
 ## 3. Answering from a notification
 
+With official Hermes Agent, approval and clarification notifications open their chat and
+offer no answer buttons, including on the Lock Screen. The answer actions below require an
+experimental HermesPush build with `HERMES_EXPERIMENTAL_LOCK_SCREEN_ANSWERS` defined and
+gateway support for the exact-ID answer contract. That flag is off by default; legacy alerts
+remain on.
+
 - **Allow Once / Deny** (`UNNotificationAction` with `.authenticationRequired`; Deny also
   `.destructive`). The app wakes in the background, uses the gateway's live backend socket or opens
   a fresh one with the saved sign-in (`PushResponder`), and answers the request the notification
@@ -491,11 +499,10 @@ Rules:
 - **Save / Don't Save** answer a "Save to memory?" request like Allow Once and Deny, offered only
   when the body shows the whole entry (240 characters, 80 on the Mac; `PushNotice.savesInBanner`).
   A longer entry opens the chat's card.
-- **Question choices** answer `clarify` with that choice; **Reply…**
-  (`UNTextInputNotificationAction`) answers it with the typed text. The app finds the open request
-  in the session's `session.resume` snapshot (`open_requests`, matched by the first question) and
-  calls `request.answer {id, result: {answers}}`; a question with several parts gets the answer for
-  the first and the rest in the app.
+- In an experimental build, **Question choices** or **Reply…** can answer a single-part
+  `clarify`. The app looks up the exact `ledger_id` in the box's read view, then calls the
+  experimental `request.answer {id, result: {answers}, profile?}`. If the answer cannot be
+  routed to the exact request, or the question has several parts, the app opens the chat.
 - **Reply…** on a reply or a message sends a new message: a chat's as a new run on the API server
   (`POST /v1/runs`), a Bot Chat's with `session.resume` in the Bot's profile and `prompt.submit`, a
   room's with `groups.send`. Which of the first two is decided by the chat, as a tap is: a chat

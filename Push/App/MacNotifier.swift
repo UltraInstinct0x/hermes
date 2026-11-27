@@ -130,6 +130,10 @@ final class MacNotifier {
 
     func handle(_ response: PushResponder.Response) {
         guard let notice = response.notice else { return }
+        if !NotificationCatalog.lockScreenAnswersEnabled && (notice.kind == .approval || notice.kind == .question) {
+            if response.action != UNNotificationDismissActionIdentifier { open(notice) }
+            return
+        }
         let entry = posted[notice.id]
         let conversation = entry?.conversation
         switch response.action {

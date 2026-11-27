@@ -218,6 +218,21 @@ public actor BackendClient {
         try await socketURL(path: "api/ws")
     }
 
+    public func ledgerSocket(gatewayID: String, identity: GatewaySocket.ClientIdentity) throws -> GatewaySocket {
+        guard gatewayID.wholeMatch(of: /[a-z0-9][a-z0-9_-]*/) != nil,
+              var components = URLComponents(url: endpoint("gw/\(gatewayID)/api/ws"), resolvingAgainstBaseURL: false) else {
+            throw Failure.notHermes
+        }
+        components.scheme = baseURL.scheme == "https" ? "wss" : "ws"
+        guard let url = components.url else { throw Failure.notHermes }
+        let bearer: String?
+        switch credential {
+        case .sessionToken(let token): bearer = token
+        case .cookies, nil: bearer = nil
+        }
+        return GatewaySocket(url: url, session: session, clientIdentity: identity, authorization: bearer.map { "Bearer \($0)" })
+    }
+
     /// A WebSocket URL on this backend with the credential attached: the session token, or a
     /// one-time ticket (30 s, single use) minted with the login cookies.
     func socketURL(path: String, query: [URLQueryItem] = []) async throws -> URL {
@@ -560,6 +575,20 @@ public actor BackendClient {
     }
 
     // MARK: - Plumbing
+
+    func boxLedger(_ path: String, query: [URLQueryItem] = []) async throws -> JSONValue {
+        let headers: [String: String]
+        switch credential {
+        case .sessionToken(let token):
+            headers = ["Authorization": "Bearer \(token)"]
+        case .cookies(let cookies):
+            headers = ["Cookie": cookies.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: "; ")]
+        case nil:
+            headers = [:]
+        }
+        let (data, _) = try await send(path: path, query: query, authenticated: false, headers: headers)
+        return JSONValue.parse(data) ?? .null
+    }
 
     /// A JSON call to the backend (the Inspector's `/api/fs/*`, `/api/git/*`; see
     /// `WorkspaceAPI.swift`).

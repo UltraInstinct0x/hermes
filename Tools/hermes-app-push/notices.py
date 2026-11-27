@@ -294,14 +294,12 @@ def question(*, request_id: str, session_id: str, chat: str, gateway_name: str, 
                "questions": cleaned, **({"bot": bot} if bot else {})})
 
 
-def password(*, request_id: str, session_id: str, chat: str, gateway_name: str, what: str,
+def password(*, request_id: str, session_id: str, chat: str, gateway_name: str,
              expires_at: float | None) -> Notice:
-    # ``what`` is the command a sudo password is for, redacted; never a value.
-    what = clip(redact(what), 120)
     return Notice(
         kind="password", id=request_id, request_id=request_id, session_id=session_id, thread=session_id,
         summary=chat, title="Hermes needs a password", subtitle=chat,
-        body=f"For {what}" if what else "Open Hermes to enter it.", hidden=f"Needs a password on {gateway_name}",
+        body="Open Hermes to enter it.", hidden=f"Needs a password on {gateway_name}",
         expires_at=expires_at)
 
 
@@ -430,7 +428,7 @@ def apns_request(device: dict, notice: Notice, gateway: dict, open_count: int, r
     }
     if notice.request_id or notice.kind in ("reply", "task", "task_failed", "tidied", *CARD_KINDS):
         request["collapse_id"] = (notice.request_id or notice.id)[:64]
-    expiry = notice.expires_at or time.time() + 86_400
+    expiry = notice.extra.get("deadline") or notice.expires_at or time.time() + 86_400
     request["expiration"] = int(expiry)
     return request
 

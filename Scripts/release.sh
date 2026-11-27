@@ -56,6 +56,7 @@ IOS_PROFILES=(
   "$BUNDLE_ID.NotificationService|Hermes Notifications App Store"
   "$BUNDLE_ID.NotificationContent|Hermes Requests App Store"
   "$BUNDLE_ID.Widgets|Hermes Widgets App Store"
+  "$BUNDLE_ID.watchkitapp|Hermes Watch App Store"
 )
 # The Mac app's Developer ID profile, for the same iCloud key-value entitlement (project.yml, Release).
 MAC_PROFILE="Hermes Developer ID"

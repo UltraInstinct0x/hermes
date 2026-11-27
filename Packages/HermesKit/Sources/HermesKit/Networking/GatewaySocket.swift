@@ -64,6 +64,7 @@ public struct GatewayServerRequest: Sendable, Equatable {
     public var params: JSONValue
 
     public var sessionID: String { params["session_id"]?.stringValue ?? "" }
+    public var ledgerID: String? { params["ledger_id"]?.stringValue }
 
     public init(id: String, method: String, params: JSONValue) {
         self.id = id
@@ -122,6 +123,18 @@ public struct GatewayRPCError: Error, Sendable, Equatable, LocalizedError {
 ///
 /// One socket serves every profile: per-request `profile` params pick the Bot.
 public actor GatewaySocket {
+    public struct ClientIdentity: Sendable {
+        public let id: String
+        public let label: String
+        public let kind: String
+
+        public init(id: String, label: String, kind: String) {
+            self.id = id
+            self.label = label
+            self.kind = kind
+        }
+    }
+
     public enum Message: Sendable {
         case frame(GatewayFrame)
         case closed((any Error)?)
@@ -145,6 +158,8 @@ public actor GatewaySocket {
 
     private let url: URL
     private let session: URLSession
+    private let clientIdentity: ClientIdentity?
+    private let authorization: String?
     /// A session made for this socket alone, closed with it.
     private let ownsSession: Bool
     /// Closed for good: a socket is opened once (its own session is gone with it).
@@ -177,8 +192,10 @@ public actor GatewaySocket {
 
     /// - Parameter session: by default the socket has a session of its own, so its upgrade never
     ///   rides a pooled connection the system closed while the app was suspended.
-    public init(url: URL, session: URLSession? = nil) {
+    public init(url: URL, session: URLSession? = nil, clientIdentity: ClientIdentity? = nil, authorization: String? = nil) {
         self.url = url
+        self.clientIdentity = clientIdentity
+        self.authorization = authorization
         ownsSession = session == nil
         // Redirects only on the same server: the socket's URL carries its token.
         self.session = session ?? URLSession(configuration: Self.sessionConfiguration, delegate: SameOriginRedirects.shared, delegateQueue: nil)
@@ -193,11 +210,12 @@ public actor GatewaySocket {
 
     /// Opens the socket, waits for `gateway.ready`, and opts into server requests
     /// (without `client.capabilities` approvals are never delivered).
-    public func connect() async throws {
+    public func connect(receivesServerRequests: Bool = true) async throws {
         guard task == nil else { return }
         guard !isFinished else { throw Failure.closed("Disconnected from the Hermes backend.") }
         var upgrade = URLRequest(url: url)
         upgrade.timeoutInterval = 15
+        upgrade.setValue(authorization, forHTTPHeaderField: "Authorization")
         GatewayAccessRegistry.shared.prepare(&upgrade)
         let task = session.webSocketTask(with: upgrade)
         task.maximumMessageSize = 64 * 1024 * 1024
@@ -218,12 +236,29 @@ public actor GatewaySocket {
                 try await group.next()
             }
             isOpen = true
-            _ = try await request("client.capabilities", ["server_requests": .bool(true)])
+            try await advertiseCapabilities(receivesServerRequests: receivesServerRequests)
         } catch {
             // A socket that never got going must not keep its receive loop or heartbeat.
             shutdown(error: error)
             throw error
         }
+    }
+
+    private func advertiseCapabilities(receivesServerRequests: Bool) async throws {
+        let baseline: [String: JSONValue] = ["server_requests": .bool(receivesServerRequests)]
+        if let clientIdentity {
+            var params = baseline
+            params["client_id"] = .string(clientIdentity.id)
+            params["label"] = .string(clientIdentity.label)
+            params["kind"] = .string(clientIdentity.kind)
+            do {
+                _ = try await request("client.capabilities", params)
+                return
+            } catch let error as GatewayRPCError where error.code == 4000 || error.code == -32602 {
+                // Older gateways reject the identity fields rather than ignoring them.
+            }
+        }
+        _ = try await request("client.capabilities", baseline)
     }
 
     private func waitForReady() async throws {

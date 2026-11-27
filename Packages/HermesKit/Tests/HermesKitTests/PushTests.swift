@@ -106,6 +106,21 @@ import Testing
         #expect(NotificationCatalog.actions(for: .board).map(\.identifier) == [NotificationCatalog.Action.open])
     }
 
+    @Test func ledgerNoticeMetadataSurvivesDecodingAndEncoding() throws {
+        let data = Data("""
+            {"kind":"question","ledger_id":"opaque","gateway_id":"home","profile_id":"research",
+             "request_id":"legacy","deadline":120,"expires_at":200}
+            """.utf8)
+        let notice = try JSONDecoder().decode(PushNotice.self, from: data)
+        #expect(notice.ledgerID == "opaque")
+        #expect(notice.gatewayID == "home")
+        #expect(notice.profileID == "research")
+        #expect(notice.requestID == "legacy")
+        #expect(notice.deadline == Date(timeIntervalSince1970: 120))
+        #expect(notice.isExpired(now: Date(timeIntervalSince1970: 121)))
+        #expect(try JSONDecoder().decode(PushNotice.self, from: JSONEncoder().encode(notice)) == notice)
+    }
+
     @Test func questionChoicesBecomeActionsOnlyWhenSimple() {
         var notice = PushNotice(kind: .question, id: "q", questions: [.init(question: "Which?", choices: ["A", "B", "C", "D"])])
         #expect(notice.actionChoices == ["A", "B", "C"])
@@ -162,10 +177,15 @@ import Testing
         let ids = Set(categories.map(\.identifier))
         #expect(ids.isSuperset(of: ["APPROVAL", "QUESTION", "REPLY", "MESSAGE", "TASK", "OPEN", "APPROVAL.0", "QUESTION.15"]))
         let approval = categories.first { $0.identifier == "APPROVAL" }!
+        #if HERMES_EXPERIMENTAL_LOCK_SCREEN_ANSWERS
         #expect(approval.actions.map(\.identifier) == ["approval.once", "approval.deny", "approval.more"])
         #expect(approval.actions[0].options.contains(.authenticationRequired))
         #expect(approval.actions[1].options.contains(.destructive))
         #expect(!approval.actions.contains { $0.title.contains("Always") })
+        #else
+        #expect(approval.actions.isEmpty)
+        #expect(NotificationCatalog.actions(for: .question, choices: ["Yes"]).isEmpty)
+        #endif
         #if os(iOS)
         #expect(categories.first { $0.identifier == "APPROVAL.0" }?.hiddenPreviewsBodyPlaceholder == "Needs your OK on Home Server")
         #endif
@@ -186,8 +206,12 @@ import Testing
         #expect(shown.body == "Vegetarian; avoids flights after 21:00.")
         #expect(shown.categoryIdentifier == "MEMORY.1" && shown.interruptionLevel == .active)
         let memory = NotificationCatalog.categories().first { $0.identifier == "MEMORY" }!
+        #if HERMES_EXPERIMENTAL_LOCK_SCREEN_ANSWERS
         #expect(memory.actions.map(\.identifier) == ["memory.save", "memory.dontsave"])
         #expect(memory.actions.map(\.title) == ["Save", "Don't Save"])
+        #else
+        #expect(memory.actions.isEmpty)
+        #endif
         let hidden = NoticePresentation(notice, gatewayName: "Studio Mac", slot: nil, showDetails: .never)
         #expect(hidden.body == "Wants to remember something on Studio Mac")
 

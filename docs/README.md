@@ -31,6 +31,7 @@ it behaves on iPhone, iPad and Mac, and how to check it. Code comments cite them
 | [onboarding.md](onboarding.md) | First launch to first chat: the welcome tour, getting Hermes Agent, setup, the getting-started checklist, tips, What's New, the Mac welcome window |
 | [search.md](search.md) | Searching chats by what was said, the Mac's ⌘K palette, and jumping to the message |
 | [bots-groups-skills.md](bots-groups-skills.md) | Bots (profiles), group chats (rooms) and Skills |
+| [watch.md](watch.md) | Read Bot states and the latest Bot Chat reply on Apple Watch |
 | [bot-faces.md](bot-faces.md) | Bot faces as Hermes Agent's Bot Mode draws them: geometry, colours, moods and motion |
 | [tasks.md](tasks.md) | Tasks and Routines (scheduled jobs): schedules, delivery, run now and edit |
 | [projects.md](projects.md) | Projects: the sidebar and project home, lanes by branch and worktree, starting and moving chats |

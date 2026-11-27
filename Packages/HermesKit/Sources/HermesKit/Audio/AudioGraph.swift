@@ -2,6 +2,7 @@
 import Foundation
 import os
 
+#if !os(watchOS)
 /// The app's one `AVAudioEngine` (`docs/voice.md` §4.2, §7), owned by the coordinator.
 ///
 /// - The microphone has a single tap, shared by everyone who listens: a voice message feeds its
@@ -513,6 +514,8 @@ public final class AudioPlayerChain: @unchecked Sendable {
 
 }
 
+#endif
+
 /// RMS levels per fixed window of a timeline that arrives in buffers of any length.
 struct LevelAccumulator {
     private(set) var levels: [Float] = []
@@ -603,7 +606,7 @@ public enum AudioLevel {
     }
 }
 
-#if DEBUG
+#if DEBUG && !os(watchOS)
 /// Plays clips into the microphone's consumers in real time, 50 ms at a time, with silence
 /// between them, as if someone were talking to the device. The clips wait for listening to start
 /// (`SimulatedClock`).

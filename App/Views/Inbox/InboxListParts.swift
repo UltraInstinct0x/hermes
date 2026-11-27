@@ -1,5 +1,144 @@
 import HermesKit
+import HermesPush
 import SwiftUI
+
+struct NeedsYouRows: View {
+    let app: AppModel
+    let windowID: UUID?
+
+    @ViewBuilder var body: some View {
+        let feed = app.needsYou
+        if let snapshot = feed.snapshot {
+            if !snapshot.open.isEmpty {
+                SidebarSectionTitle(title: String(localized: "Needs You"))
+                ForEach(snapshot.open) { row in
+                    let choices = feed.inlineChoices(row)
+                    entry(row, detail: feed.receipts[row.id], showWholeCommand: choices.contains(.once)) {
+                        if !choices.isEmpty {
+                            HStack(spacing: 8) {
+                                if choices.contains(.deny) {
+                                    ActionTile(symbol: "xmark", title: String(localized: "Deny"),
+                                               detail: String(localized: "Don't run this command"), style: .danger) {
+                                        answer(row, with: .deny)
+                                    }
+                                    .accessibilityIdentifier("needsYou.deny")
+                                }
+                                if choices.contains(.once) {
+                                    ActionTile(symbol: "checkmark", title: String(localized: "Allow Once"),
+                                               detail: String(localized: "Only this command"), style: .primary) {
+                                        answer(row, with: .once)
+                                    }
+                                    .accessibilityIdentifier("needsYou.allow")
+                                }
+                            }
+                            .disabled(feed.answering.contains(row.id))
+                        }
+                        if feed.localWorkspace(for: row, in: app) != nil {
+                            Button("Open Chat") { feed.openLocalChat(row, app: app, window: windowID) }
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    .task(id: feed.lookupRetries[row.id, default: 0]) { await feed.loadRequestNames(row) }
+                }
+            }
+            let rows = snapshot.recent + feed.earlier.filter { row in !snapshot.recent.contains { $0.id == row.id } }
+            if !rows.isEmpty || feed.moreHistory && !(snapshot.sources ?? []).isEmpty {
+                SidebarSectionTitle(title: String(localized: "Earlier"))
+                ForEach(rows) { row in
+                    entry(row, detail: feed.receipts[row.id] ?? historyDetail(row)) { EmptyView() }
+                }
+                if feed.moreHistory {
+                    SidebarNavRow(title: "Load Earlier", symbol: "clock") {
+                        Task { await feed.loadEarlier(Array(app.workspaces.values)) }
+                    }
+                    .disabled(feed.loadingHistory)
+                }
+            }
+            ForEach((snapshot.sources ?? []).filter { $0.state != .live }) { source in
+                SetupNote(status: source.setupStatus, actionTitle: String(localized: "Check Again")) {
+                    Task { await app.refreshLedger() }
+                }
+                .modifier(SidebarRowInsets())
+            }
+        } else {
+            SkeletonRows(count: 2)
+                .modifier(SidebarRowInsets())
+        }
+    }
+
+    private func answer(_ row: LedgerRow, with choice: ApprovalChoice) {
+        Task { await app.needsYou.answer(row, choice: choice, workspaces: Array(app.workspaces.values)) }
+    }
+
+    private func entry<Actions: View>(
+        _ row: LedgerRow, detail: String?, showWholeCommand: Bool = false, @ViewBuilder actions: () -> Actions
+    ) -> some View {
+        let workspace = app.needsYou.localWorkspace(for: row, in: app)
+        let bot = workspace?.roster?.bot(named: row.profileID ?? row.profile)
+        let names = app.needsYou.requestNames[row.id]
+        let asker = bot?.title ?? names?.bot ?? (row.profileID ?? row.profile)
+        let chat = names?.chat ?? row.sessionID.flatMap { id in
+            workspace?.session(forKey: workspace?.unreadKey(forStoredSession: id) ?? id)?.displayTitle
+        }
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                if let bot, let roster = workspace?.roster {
+                    BotFace(appearance: roster.appearance(for: bot), size: 22)
+                        .accessibilityHidden(true)
+                }
+                Text(VisibleText.of(asker))
+                    .font(.subheadline.weight(.semibold))
+                if let label = chat ?? row.sessionID.map({ String(localized: "Chat \($0.suffix(6))") }), label != asker {
+                    Text("·")
+                        .accessibilityHidden(true)
+                    Text(VisibleText.of(label))
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            Text(title(row))
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("needsYou.request")
+            if showWholeCommand, let command = names?.approval?.command {
+                Text(command)
+                    .font(.footnote.monospaced())
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let prompt = row.prompt, !prompt.isEmpty {
+                Text(VisibleText.of(prompt))
+                    .font(.footnote)
+                    .lineLimit(3)
+            }
+            if let detail {
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            actions()
+        }
+        .padding(.vertical, 8)
+        .modifier(SidebarRowInsets())
+    }
+
+    private func title(_ row: LedgerRow) -> String {
+        switch row.kind {
+        case "approval": String(localized: "Approval")
+        case "clarify": String(localized: "Question")
+        case "sudo", "secret": String(localized: "Password needed")
+        default: String(localized: "Request")
+        }
+    }
+
+    private func historyDetail(_ row: LedgerRow) -> String {
+        switch row.state {
+        case "answered": NeedsYouFeed.answeredBy(row.answeredBy)
+        case "settled": String(localized: "Resolved")
+        case "unverified": String(localized: "No longer tracked")
+        case "lost_on_restart": String(localized: "Gateway restarted before this was answered")
+        case "expired": String(localized: "Timed out")
+        default: String(localized: "No longer pending")
+        }
+    }
+}
 
 // MARK: - Filters
 
