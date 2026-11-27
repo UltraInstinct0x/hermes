@@ -5191,6 +5191,7 @@ extension ConversationModel {
             }
             // Cards answered on another device, or past their deadline, while this one was away.
             if let open = RequestSync.openIDs(snapshot["open_requests"]) { takeDownEndedRequests(open: open) }
+            takeDownEndedLedgerCards(in: snapshot)
             if case .array(let requests)? = snapshot["open_requests"] {
                 settleAnswers(open: requests.compactMap { $0["id"]?.stringValue }, roster: roster)
                 for request in requests {
@@ -5871,7 +5872,8 @@ extension ConversationModel {
         }
         // Hermes tells no one else when a device answers a request: while a card is up and the
         // chat moves on, ask which requests it still waits on (`RequestSync`).
-        if !shownRequestCards.isEmpty, !["request.cancel", "connection.request", "connection.update"].contains(event.type) {
+        if (!shownRequestCards.isEmpty || ledgerApproval != nil || ledgerClarification != nil),
+           !["request.cancel", "connection.request", "connection.update"].contains(event.type) {
             scheduleRequestSync()
         }
         switch event.type {
@@ -6343,9 +6345,44 @@ extension ConversationModel {
         requestSyncTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
             guard let self else { return }
-            if let open = await self.openRequestIDs() { self.takeDownEndedRequests(open: open) }
+            if self.ledgerApproval != nil || self.ledgerClarification != nil {
+                await self.syncLedgerCards()
+            } else if let open = await self.openRequestIDs() {
+                self.takeDownEndedRequests(open: open)
+            }
             self.requestSyncTask = nil
         }
+    }
+
+    private func syncLedgerCards() async {
+        guard let roster = gatewayRoster, let runtime = runtimeSessionID, !Task.isCancelled else { return }
+        var params: [String: JSONValue] = ["session_id": .string(runtime), "omit_messages": .bool(true)]
+        if let profile = gatewayProfile { params["profile"] = .string(profile) }
+        let approval = ledgerApproval?.reference
+        let clarification = ledgerClarification?.reference
+        // Unlike events.since, resume on the attached chat includes the canonical prompts.
+        guard let snapshot = try? await roster.request("session.resume", params, timeout: .seconds(10)),
+              runtime == runtimeSessionID, snapshot["session_id"]?.stringValue == runtime, !Task.isCancelled else { return }
+        if let open = RequestSync.openIDs(snapshot["open_requests"]) { takeDownEndedRequests(open: open) }
+        if ledgerApproval?.reference == approval, ledgerClarification?.reference == clarification {
+            takeDownEndedLedgerCards(in: snapshot)
+        }
+    }
+
+    private func takeDownEndedLedgerCards(in snapshot: JSONValue) {
+        func ended(_ reference: RequestReference?, kind: String) -> Bool {
+            guard let reference, let generation = reference.executionGeneration, !reference.isFrame else { return false }
+            return RequestSync.nativePromptEnded(in: snapshot, sessionID: reference.sessionId, promptID: reference.requestId,
+                                                 generation: generation, kind: kind)
+        }
+        let approvalEnded = ended(ledgerApproval?.reference, kind: "approval")
+        let clarificationEnded = ended(ledgerClarification?.reference, kind: "clarify")
+        guard approvalEnded || clarificationEnded else { return }
+        moveCards {
+            if approvalEnded { ledgerApproval = nil }
+            if clarificationEnded { ledgerClarification = nil }
+        }
+        recordRequestOutcome(.noLongerWaiting)
     }
 
     /// The requests Hermes still waits on in this chat (`session.events.since` lists them; it only

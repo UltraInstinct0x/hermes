@@ -42,4 +42,14 @@ public enum RequestSync {
         guard case .array(let list)? = value else { return nil }
         return Set(list.compactMap { $0["id"]?.stringValue })
     }
+
+    public static func nativePromptEnded(in snapshot: JSONValue, sessionID: String, promptID: String,
+                                         generation: Int, kind: String) -> Bool {
+        guard ["session_id", "stored_session_id", "resumed"].contains(where: { snapshot[$0]?.stringValue == sessionID }),
+              let prompts = snapshot["prompts"]?.arrayValue else { return false }
+        return !prompts.contains {
+            $0["prompt_id"]?.stringValue == promptID && $0["kind"]?.stringValue == kind
+                && $0["execution_generation"]?.doubleValue == Double(generation)
+        }
+    }
 }
