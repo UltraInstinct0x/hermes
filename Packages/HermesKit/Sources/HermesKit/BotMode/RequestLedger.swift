@@ -239,6 +239,29 @@ public struct LedgerSnapshot: Decodable, Sendable, Equatable {
         case open, recent, sources, openCount = "open_count"
     }
 
+    public enum Lookup: Equatable, Sendable {
+        case pending(LedgerRow)
+        case notPending
+        case unavailable
+    }
+
+    public func lookup(gatewayID: String, profileID: String, sessionID: String, requestID: String) -> Lookup {
+        let matches = (open + recent).filter {
+            $0.gatewayID == gatewayID && ($0.profileID ?? $0.profile) == profileID
+                && $0.sessionID == sessionID && $0.requestID == requestID
+        }
+        if matches.count == 1, let row = matches.first {
+            if row.state == "open" { return .pending(row) }
+            if LedgerHistory.closedStates.contains(row.state) { return .notPending }
+            return .unavailable
+        }
+        guard matches.isEmpty,
+              sources?.contains(where: {
+                  $0.gatewayID == gatewayID && $0.profileID == profileID && $0.state == .live
+              }) == true else { return .unavailable }
+        return .notPending
+    }
+
     public static func merge(_ snapshots: [Self]) -> Self {
         let recent = unique(snapshots.flatMap(\.recent).sorted {
             ($0.settledAt ?? $0.answeredAt ?? $0.createdAt) > ($1.settledAt ?? $1.answeredAt ?? $1.createdAt)

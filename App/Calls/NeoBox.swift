@@ -5,6 +5,7 @@ import HermesActivityKit
 import HermesBox
 import HermesKit
 import Observation
+import UIKit
 
 /// Hermes Neo: the owner's box (its BFF, `box/bff`) and the calls its Bots make to this phone.
 ///
@@ -318,9 +319,15 @@ final class NeoBox {
 
     func answerRequest(_ reference: RequestReference, shown: String, selection: RequestSelection) async -> RequestActivityAttributes.ContentState.Outcome? {
         guard lockScreen.approvals, !isPairing, let app else { return nil }
-        guard let row = await app.needsYou.resolveRequest(reference, workspaces: Array(app.workspaces.values)),
-              row.state == "open" else { return .noLongerWaiting }
-        return await app.needsYou.answerNativeRequest(reference, selection: selection, shown: shown)
+        switch await app.needsYou.lookupRequest(reference, workspaces: Array(app.workspaces.values)) {
+        case .pending:
+            return await app.needsYou.answerNativeRequest(reference, selection: selection, shown: shown)
+        case .notPending:
+            return .noLongerWaiting
+        case .unavailable:
+            await UIApplication.shared.open(ActivityLink.request(reference).url)
+            return nil
+        }
     }
 
     /// The calling bot's chat in the app, when a gateway's Bot Mode lists a bot of that profile: its waiting approval

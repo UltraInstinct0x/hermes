@@ -3,6 +3,22 @@ import Testing
 @testable import HermesKit
 
 @Suite struct RequestLedgerTests {
+    @Test func aMissingRequestNeedsCoverageFromItsOwnLedger() throws {
+        let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
+            {"request_id":"target","session_id":"chat","gateway_id":"owner","profile":"bot","kind":"approval","state":"open","created_at":2}
+            """)))
+        func lookup(_ sources: [LedgerSource], open: [LedgerRow] = []) -> LedgerSnapshot.Lookup {
+            LedgerSnapshot(open: open, recent: [], openCount: open.count, sources: sources)
+                .lookup(gatewayID: "owner", profileID: "bot", sessionID: "chat", requestID: "target")
+        }
+        let owner = LedgerSource.ID(gatewayID: "owner", profileID: "bot")
+        let other = LedgerSource(id: .init(gatewayID: "other", profileID: "bot"), state: .live)
+        #expect(lookup([other, .init(id: owner, state: .offline)]) == .unavailable)
+        #expect(lookup([other]) == .unavailable)
+        #expect(lookup([other, .init(id: owner, state: .live)]) == .notPending)
+        #expect(lookup([.init(id: owner, state: .live)], open: [row]) == .pending(row))
+    }
+
     @Test func nativeApprovalUsesCanonicalPromptIdentityAndOfferedChoices() throws {
         let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
             {"request_id":"native-id","session_id":"session-1","profile":"default","kind":"approval","state":"open","created_at":2}

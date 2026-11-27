@@ -268,8 +268,17 @@ final class NeedsYouFeed {
         }
     }
 
-    func resolveRequest(_ ref: RequestReference, workspaces: [BotWorkspace]) async -> LedgerRow? {
-        await resolveRequest(botKey: ref.botKey, requestId: ref.requestId, sessionId: ref.sessionId, workspaces: workspaces)
+    func lookupRequest(_ ref: RequestReference, workspaces: [BotWorkspace]) async -> LedgerSnapshot.Lookup {
+        await ledgerRefresh.waitForNextSnapshot { await self.refreshSnapshot(workspaces) }
+        guard !Task.isCancelled else { return .unavailable }
+        return lookupRequest(ref)
+    }
+
+    private func lookupRequest(_ ref: RequestReference) -> LedgerSnapshot.Lookup {
+        guard let separator = ref.botKey.range(of: "::") else { return .unavailable }
+        return snapshot?.lookup(gatewayID: String(ref.botKey[..<separator.lowerBound]),
+                                profileID: String(ref.botKey[separator.upperBound...]),
+                                sessionID: ref.sessionId, requestID: ref.requestId) ?? .unavailable
     }
 
     func resolveRequest(botKey: String, requestId: String, sessionId: String? = nil,
@@ -290,7 +299,12 @@ final class NeedsYouFeed {
     func answerNativeRequest(_ ref: RequestReference, selection: RequestSelection, shown: String,
                              acceptsTypedAnswer: Bool = false, choiceOnCard: ApprovalChoice? = nil,
                              requiresPlainCommand: Bool = false) async -> RequestActivityAttributes.ContentState.Outcome? {
-        guard let row = requestRow(botKey: ref.botKey, requestId: ref.requestId, sessionId: ref.sessionId) else { return .noLongerWaiting }
+        let row: LedgerRow
+        switch lookupRequest(ref) {
+        case .pending(let pending): row = pending
+        case .notPending: return .noLongerWaiting
+        case .unavailable: return nil
+        }
         guard let route = routes[row.id] else { return nil }
         guard receipts[row.id] == nil, answering.insert(row.id).inserted else { return nil }
         defer { answering.remove(row.id) }
