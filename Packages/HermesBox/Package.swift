@@ -11,11 +11,15 @@ let package = Package(
     products: [
         .library(name: "HermesBox", targets: ["HermesBox"]),
     ],
+    dependencies: [
+        // Hermes Neo: the Live Activity attributes the box pushes (shared with the widget extension).
+        .package(path: "../HermesActivityKit"),
+    ],
     targets: [
-        .target(name: "HermesBox"),
+        .target(name: "HermesBox", dependencies: [.product(name: "HermesActivityKit", package: "HermesActivityKit")]),
         .testTarget(
             name: "HermesBoxTests",
-            dependencies: ["HermesBox"],
+            dependencies: ["HermesBox", .product(name: "HermesActivityKit", package: "HermesActivityKit")],
             resources: [.copy("Fixtures")]
         ),
     ],

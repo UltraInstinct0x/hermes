@@ -1,6 +1,7 @@
 import HermesKit
 import SwiftUI
 #if os(iOS)
+import HermesActivityKit
 import UIKit
 import UniformTypeIdentifiers
 #endif
@@ -211,6 +212,18 @@ struct RootView: View {
             Text(app.storageError ?? "")
         }
         .onOpenURL { url in
+            #if os(iOS)
+            if let link = ActivityLink(url: url) {
+                let window = router.windowID
+                if router.sheet != nil {
+                    router.afterDismiss = { NeoBox.shared.openRequestLink(link, window: window) }
+                    router.sheet = nil
+                } else {
+                    NeoBox.shared.openRequestLink(link, window: window)
+                }
+                return
+            }
+            #endif
             if !openBoardLink(url) { router.open(url) }
         }
         #if os(macOS)
@@ -229,6 +242,9 @@ struct RootView: View {
         .motionProbe()
         #if os(iOS)
         .task { fillDebugPasteboard() }
+        .task(id: scenePhase) {
+            if scenePhase == .active { await NeoRequestActivityDemo.startIfAsked() }
+        }
         #endif
         #if os(macOS)
         // `-HERMES_APPS_TOOLS …` / `-HERMES_MEMORY …` / `-HERMES_SETTINGS_SETUP …` /

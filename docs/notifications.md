@@ -477,6 +477,20 @@ Rules:
 
 ## 3. Answering from a notification
 
+**Hermes Neo (iPhone).** Settings → Requests → **Requests on this phone** opts in to a
+request-only Live Activity from the paired box. This does not turn on general chat alerts,
+the always-on Bot activity, or a separate call activity. Tap the activity or a box request
+alert to open the Bot's chat, or Needs You if the chat cannot be identified. Box alerts
+open the app because their shared APNs category cannot certify the exact request. Live
+Activity answers require the experimental flag and an exact, still-open session request
+whose content matches what was shown. Actual delivery requires the box producer to support
+the official Agent prompt hooks; with general notifications off, the current box sends
+alerts only as part of a request Live Activity, not as a standalone fallback.
+
+For a local simulator check, launch a Debug build with
+`-NEO_REQUEST_ACTIVITY_DEMO 1`, then lock the phone. This starts a sample request
+activity without contacting a box. `-HERMES_OPEN settings` opens Settings.
+
 With official Hermes Agent, approval and clarification notifications open their chat and
 offer no answer buttons, including on the Lock Screen. The answer actions below require an
 experimental HermesPush build with `HERMES_EXPERIMENTAL_LOCK_SCREEN_ANSWERS` defined and

@@ -31,7 +31,7 @@ struct NotificationSettingsView: View {
         Form {
             if push.isDenied {
                 Section { deniedCard }
-            } else if push.authorization == .notDetermined {
+            } else if !push.canNotify {
                 Section {
                     Button("Turn On Notifications") {
                         Task { await push.requestAuthorization() }

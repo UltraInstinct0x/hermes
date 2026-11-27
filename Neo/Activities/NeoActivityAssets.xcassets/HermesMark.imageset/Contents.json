@@ -1,0 +1,23 @@
+{
+  "images": [
+    {
+      "filename": "HermesMark.png",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "filename": "HermesMark@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "filename": "HermesMark@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

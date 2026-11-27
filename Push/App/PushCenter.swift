@@ -49,6 +49,11 @@ final class PushCenter {
     }
 
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
+    #if os(iOS)
+    private var requestsOnlyAuthorization = PushShared.current.requestsOnlyAuthorization {
+        didSet { shared.requestsOnlyAuthorization = requestsOnlyAuthorization }
+    }
+    #endif
     private(set) var showPreviews: UNShowPreviewsSetting = .always
     private(set) var timeSensitive: UNNotificationSetting = .notSupported
     private(set) var deviceToken: String?
@@ -265,15 +270,28 @@ final class PushCenter {
     /// Turn On Notifications. Time Sensitive comes from the entitlement, not an option here
     /// (`UNAuthorizationOptionTimeSensitive` only ever worked in iOS 15.0).
     func requestAuthorization() async {
+        #if os(iOS)
+        let couldNotify = canNotify
+        #endif
         let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(
             options: [.alert, .sound, .badge, .providesAppNotificationSettings]
         )) ?? false
         await refreshAuthorization()
         #if os(iOS)
-        if granted { UIApplication.shared.registerForRemoteNotifications() }
+        if granted {
+            requestsOnlyAuthorization = false
+            UIApplication.shared.registerForRemoteNotifications()
+            if !couldNotify, canNotify { registeredAt.removeAll() }
+        }
         #endif
         prime = nil
     }
+
+    #if os(iOS)
+    func reserveAuthorizationForRequests() {
+        requestsOnlyAuthorization = true
+    }
+    #endif
 
     /// A moment worth asking in: the first approval, a turn that ran over 30 s, or leaving while
     /// one runs. Never at launch; away from the app, on the way back. After Not Now, once more a
@@ -325,7 +343,7 @@ final class PushCenter {
 
     var canNotify: Bool {
         #if os(iOS)
-        authorization == .authorized || authorization == .provisional || authorization == .ephemeral
+        !requestsOnlyAuthorization && (authorization == .authorized || authorization == .provisional || authorization == .ephemeral)
         #else
         authorization == .authorized || authorization == .provisional
         #endif
@@ -418,7 +436,15 @@ final class PushCenter {
             return
         }
         registering.insert(id)
-        defer { registering.remove(id) }
+        defer {
+            registering.remove(id)
+            #if os(iOS)
+            if rule == .status, shared.gatewayCheck(appID: id, hasToken: deviceToken != nil, canNotify: canNotify) == .register {
+                registeredAt[id] = nil
+                failedChecks[id] = nil
+            }
+            #endif
+        }
         if gatewayStates[id] != .on(relay: nil) { gatewayStates[id] = .checking }
         let client = AppPushClient { method, params in try await roster.request(method, params, timeout: .seconds(20)) }
         do {
@@ -638,9 +664,12 @@ final class PushCenter {
         for gateway in shared.gateways.values {
             if let slot = gateway.slot { slots[slot] = gateway.name }
         }
-        UNUserNotificationCenter.current().setNotificationCategories(
-            NotificationCatalog.categories(slots: slots, questionChoices: questionChoices)
-        )
+        var categories = NotificationCatalog.categories(slots: slots, questionChoices: questionChoices)
+        #if os(iOS)
+        // Hermes Neo: the box's open-only request alerts, beside upstream's own.
+        categories.formUnion(NeoNotificationRouting.categories)
+        #endif
+        UNUserNotificationCenter.current().setNotificationCategories(categories)
     }
 
     // MARK: - Where the person is

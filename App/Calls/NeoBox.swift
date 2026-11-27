@@ -1,6 +1,7 @@
 #if os(iOS)
 import CryptoKit
 import Foundation
+import HermesActivityKit
 import HermesBox
 import HermesKit
 import Observation
@@ -39,6 +40,11 @@ final class NeoBox {
 
     let voip: VoIPRegistrar
     let calls: CallController
+    let push: PushRegistrar
+    private(set) var lockScreen: LockScreenPreferences
+    @ObservationIgnored private let lockScreenStore = UserDefaultsLockScreenPreferences(key: "neo.lockScreenPreferences.v1")
+    @ObservationIgnored private let activities: NeoActivityHost
+    @ObservationIgnored private var pendingRequestLink: ActivityLink?
     /// The call's audio on the app's audio coordinator; CallKit tells it when the session is live.
     @ObservationIgnored let callAudio: NeoCallAudio
 
@@ -67,6 +73,12 @@ final class NeoBox {
         let environment = ApsEnvironment.current(
             profileURL: Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"), isSimulatorOrDebugFallback: debugFallback)
         voip = VoIPRegistrar(environment: environment, topic: Bundle.main.bundleIdentifier, store: UserDefaultsCallsFromBots())
+        let push = PushRegistrar(platform: NeoRemotePlatform(environment: environment), topic: Bundle.main.bundleIdentifier, state: UserDefaultsPushState())
+        self.push = push
+        let preferences = lockScreenStore.load() ?? .allOff
+        lockScreen = preferences
+        push.configure(preferences: preferences)
+        activities = NeoActivityHost { event in await push.handle(event) }
         let audio = NeoCallAudio()
         callAudio = audio
         let calls = CallController(
@@ -84,10 +96,20 @@ final class NeoBox {
             prepare: { NeoBox.shared.restoreIfNeeded() },
             keepAlive: { NeoRingBackgroundTime.begin($0) })
         callKit.coordinator = rings
+        NeoActivityButtonRouter.handler = self
+        push.onGateChange = { [weak self] enabled in
+            if enabled { self?.activities.start() }
+            else { self?.activities.stop() }
+        }
+        push.setNotificationsProbe { await NeoRemotePlatform.notificationsAllowed() }
+        if push.pushTokensEnabled { activities.start() }
         restoreIfNeeded()
         pushKit = NeoPushKitHost(coordinator: rings, voip: voip)
         // The box refused the device token: drop it, so the next attempt pairs again on the gateway login.
-        voip.onUnauthorized = { [weak self] in self?.forgetPairing() }
+        voip.onUnauthorized = { [weak self] in
+            guard let self, !isPairing else { return }
+            forgetPairing()
+        }
         let talk = NeoTalkCall(calls: calls, box: self)
         talk.start()
         self.talk = talk
@@ -107,7 +129,11 @@ final class NeoBox {
     /// checked now (no pairing yet, or a different login).
     func attach(_ app: AppModel) {
         self.app = app
-        guard voip.isEnabled else { return }
+        if let pendingRequestLink {
+            self.pendingRequestLink = nil
+            openRequestLink(pendingRequestLink)
+        }
+        guard voip.isEnabled || lockScreen.approvals else { return }
         Task { await ensurePaired(quietly: true) }
     }
 
@@ -132,10 +158,14 @@ final class NeoBox {
             }
             return false
         }
+        guard !isPairing else { return false }
         if let box, box.baseURL == login.bff, pairing.gatewayFingerprint() == login.fingerprint { return true }
-        if box != nil { forgetPairing() }
         isPairing = true
         defer { isPairing = false }
+        if box != nil {
+            await push.forget()
+            forgetPairing()
+        }
         do {
             let paired = try await pairing.pairWithGateway(baseURL: login.bff, credentialHeaders: login.headers)
             pairing.rememberGatewayFingerprint(login.fingerprint)
@@ -197,13 +227,69 @@ final class NeoBox {
         links.bff = nil
         box = nil
         voip.attach(nil)
+        push.attach(nil)
+        activities.stop()
     }
 
     private func adopt(_ paired: PairedBox) {
         let client = links.adopt(paired)
         box = paired
         voip.attach(client)
+        push.attach(client)
         Task { [voip] in await voip.start() }
+        Task { [weak self] in
+            guard let self, self.box == paired else { return }
+            await push.start(preferences: lockScreen)
+        }
+    }
+
+    func deviceTokenReceived(_ token: Data) {
+        let hex = ActivityPushTokens.hex(token)
+        Task { [push] in await push.deviceTokenReceived(hex) }
+    }
+
+    func setRequestsEnabled(_ on: Bool) async {
+        let preferences = LockScreenPreferences(approvals: on)
+        lockScreen = preferences
+        lockScreenStore.save(preferences)
+        if on, !(await ensurePaired()) { return }
+        guard lockScreen == preferences, isPaired, !isPairing else { return }
+        await push.preferencesChanged(preferences)
+        if !on { await activities.endRequests() }
+    }
+
+    func refreshPush() async {
+        if lockScreen.approvals, !(await ensurePaired(quietly: true)) { return }
+        guard !isPairing else { return }
+        await push.start(preferences: lockScreen)
+    }
+
+    func openRequestLink(_ link: ActivityLink, window: UUID? = nil) {
+        guard let app else { pendingRequestLink = link; return }
+        if case .bot(let key) = link {
+            let bot = BotKey(rawValue: key)
+            let matches = app.workspaces.values.filter {
+                box != nil && $0.roster?.backendClient.baseURL.host() == box?.baseURL.host()
+                    && $0.roster?.bot(named: bot.profileId) != nil
+            }
+            if matches.count == 1, let workspace = matches.first {
+                app.select(workspace.id, in: window)
+                workspace.sidebarMode = .bots
+                workspace.selection = .bot(bot.profileId)
+                return
+            }
+        }
+        guard let workspace = window.flatMap({ app.workspace(in: $0) }) ?? app.currentWorkspace else { return }
+        workspace.sidebarMode = .chats
+        workspace.inboxFilter = .needsYou
+        workspace.searchText = ""
+        workspace.selection = nil
+    }
+
+    func answerRequest(botKey: String, requestId: String, shown: String, answer: WatchCompanion.RequestAnswer) async -> Bool {
+        guard lockScreen.approvals, let app else { return false }
+        return await app.needsYou.answerFromLiveActivity(botKey: BotKey(rawValue: botKey), requestId: requestId,
+                                                        shown: shown, answer: answer, workspaces: Array(app.workspaces.values))
     }
 
     /// The calling bot's chat in the app, when a gateway's Bot Mode lists a bot of that profile: its waiting approval
