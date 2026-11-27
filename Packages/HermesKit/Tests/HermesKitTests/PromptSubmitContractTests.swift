@@ -43,6 +43,21 @@ struct PromptSubmitContractTests {
         }
     }
 
+    @Test func onlyAuthoritySubmitsCarryStagedPhotoReferences() {
+        var images = StagedImages()
+        let photo: JSONValue = .object(["path": .string("/staged/photo.jpg"), "mime": .string("image/jpeg")])
+        images.staged(photo)
+        let submit = PromptSubmitContract(sessionID: "rt-1", text: "", images: images)
+        #expect(submit.params(sessionAuthority: true)["attachments"] == .array([photo]))
+        #expect(submit.params(sessionAuthority: false)["attachments"] == nil)
+    }
+
+    @Test func onlyAuthorityPromptsRejectMoreThanTenPhotos() {
+        #expect(PromptSubmitContract.allowsPhotoCount(10, sessionAuthority: true))
+        #expect(!PromptSubmitContract.allowsPhotoCount(11, sessionAuthority: true))
+        #expect(PromptSubmitContract.allowsPhotoCount(11, sessionAuthority: false))
+    }
+
     @Test func eachMessageMintsItsOwnID() {
         let first = PromptSubmitContract(sessionID: "rt-1", text: "Hi")
         let second = PromptSubmitContract(sessionID: "rt-1", text: "Hi")

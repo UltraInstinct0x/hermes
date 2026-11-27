@@ -3233,6 +3233,17 @@ final class ConversationModel: Identifiable {
             var sent = false
             do {
                 let runtime = try await ensureRuntime()
+                guard try await roster.allowsPromptPhotos(item.images.count) else {
+                    expectedFromGateway.removeAll { $0.text == item.line }
+                    var held = item
+                    held.isHeld = true
+                    animateRows {
+                        gatewayHeld.release(item.line)
+                        queue.append(held)
+                    }
+                    banner = Self.promptPhotoLimitError
+                    return
+                }
                 stagedOn = runtime
                 for (index, image) in item.images.enumerated() {
                     staged.staged(try await roster.request("image.attach_bytes", [
@@ -3253,7 +3264,8 @@ final class ConversationModel: Identifiable {
                 sent = true
                 // Its own id, so Hermes knows it again if it already has it; a stale session is
                 // resumed and the message sent again, once.
-                let submit = PromptSubmitContract(sessionID: runtime, text: prompt, queued: true, submissionID: item.id.uuidString)
+                let submit = PromptSubmitContract(sessionID: runtime, text: prompt, queued: true,
+                                                  submissionID: item.id.uuidString, images: staged)
                 let result = try await PromptSubmitContract.submittingOnce(submit) { submit in
                     try await roster.submitPrompt(submit)
                 } resume: {
@@ -3290,6 +3302,10 @@ final class ConversationModel: Identifiable {
         for path in staged.paths {
             _ = try? await roster.request("image.detach", ["session_id": .string(runtime), "path": .string(path)])
         }
+    }
+
+    private static var promptPhotoLimitError: HermesError {
+        .invalidResponse(String(localized: "Send up to \(PromptSubmitContract.authorityPhotoLimit) photos per message. Remove some photos and try again."))
     }
 
     /// A message the gateway holds: shown in the tray until its turn starts. `item` is the whole
@@ -5140,9 +5156,8 @@ extension ConversationModel {
                 recoverStoredMidTurn()
             }
             if let inflight { adopt(inflight) }
-            // What Hermes holds for the next turn (`queued`): in the tray, read-only.
-            // Hermes shows only the first it holds: what this device sent stays, whole (`GatewayHeldQueue`).
-            let head = GatewayQueue.queuedPrompt(in: snapshot)
+            // What Hermes holds for the next turn: the tray keeps this device's whole messages.
+            let head = GatewayQueue.queuedPrompt(in: snapshot).map { $0.isEmpty ? String(localized: "Photo") : $0 }
             let heldNone = gatewayHeld.isEmpty
             let dropped = gatewayHeld.attached(head: head)
             if let head, heldNone {
@@ -5254,6 +5269,11 @@ extension ConversationModel {
                 }
                 guard await roster.untilConnected() else { throw CancellationError() }
                 var runtime = try await ensureRuntime()
+                guard try await roster.allowsPromptPhotos(images.count) else {
+                    isBotTurnOpen = false
+                    restoreDraft(text: text, images: images, files: files, error: Self.promptPhotoLimitError)
+                    return
+                }
                 if isBotChat, ["/new", "/reset", "/compact", "/compress"].contains(command) {
                     endDelivery()
                     try await compactBotChat(runtime: runtime, wasReset: command == "/new" || command == "/reset")
@@ -5339,7 +5359,8 @@ extension ConversationModel {
                 // seen yet (a process's notice, a held message Hermes sends as a turn ends, another
                 // device's): with `queued` a busy chat queues it, and the answer says so.
                 let submit = PromptSubmitContract(sessionID: runtime, text: prompt, queued: true,
-                                                  extras: turnVoice?.submitParams ?? [:], submissionID: messageID.uuidString)
+                                                  extras: turnVoice?.submitParams ?? [:], submissionID: messageID.uuidString,
+                                                  images: staged)
                 // Patient: on an open socket the answer comes when a frozen backend wakes; a socket that
                 // dies fails it at once. One that goes quiet never answers, so the stored chat is read
                 // meanwhile (`submitWatched`), counted from here.

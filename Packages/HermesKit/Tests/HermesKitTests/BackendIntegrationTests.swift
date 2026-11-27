@@ -116,6 +116,46 @@ struct BackendIntegrationTests {
         #expect(live.turn.steps.contains { if case .tool(let tool) = $0 { tool.status == .succeeded && tool.callID != nil } else { false } })
     }
 
+    @Test(.timeLimit(.minutes(1))) func authorityQueueKeepsThePhotoWithItsOwnPrompt() async throws {
+        let (_, socket) = try await connect()
+        defer { Task { await socket.close() } }
+        guard await socket.sessionAuthority else { return }
+        let created = try await socket.request("session.create", [
+            "profile": .string("default"), "title": .string("Media scratch"), "hidden": .bool(true),
+        ])
+        let stored = try #require(created["stored_session_id"]?.stringValue)
+        let runtime = try #require(created["session_id"]?.stringValue)
+        let events = await socket.messages()
+        var iterator = events.makeAsyncIterator()
+        let upload = try await socket.request("image.attach_bytes", [
+            "session_id": .string(runtime), "filename": .string("photo.jpg"), "content_base64": .string("/9j/"),
+        ])
+        var images = StagedImages()
+        images.staged(upload)
+        _ = try await submit(PromptSubmitContract(sessionID: runtime, text: "slow: no media"), on: socket)
+        while let message = await iterator.next() {
+            guard case .frame(.event(let event)) = message, event.sessionID == runtime, event.type == "message.start" else { continue }
+            break
+        }
+        _ = try await submit(PromptSubmitContract(sessionID: runtime, text: "queued media", images: images), on: socket)
+        let waiting = try await socket.request("session.resume", ["session_id": .string(stored)])
+        #expect(waiting["queued"] == nil)
+        #expect(GatewayQueue.queuedPrompt(in: waiting) == "queued media")
+        var completed = 0
+        while let message = await iterator.next() {
+            guard case .frame(.event(let event)) = message, event.sessionID == runtime, event.type == "message.complete" else { continue }
+            completed += 1
+            if completed == 2 { break }
+        }
+        #expect(completed == 2)
+        let snapshot = try await socket.request("session.resume", ["session_id": .string(stored)])
+        guard case .array(let rows)? = snapshot["messages"] else { Issue.record("No stored rows"); return }
+        let content = rows.compactMap { $0["content"]?.stringValue }
+        let path = try #require(upload["path"]?.stringValue)
+        #expect(content.contains("slow: no media"))
+        #expect(content.contains { $0.contains("queued media") && $0.contains(path) })
+    }
+
     @Test func approvalsAreServerRequests() async throws {
         let (_, socket) = try await connect()
         defer { Task { await socket.close() } }

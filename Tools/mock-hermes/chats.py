@@ -69,7 +69,8 @@ def install(backend_globals, gateway_module):
             return original["prompt.submit"](params)
         # The same contract as every other chat: refusals, `not_found` and admissions (backend.py `admit_prompt`).
         return B["admit_prompt"](params, lambda sid, runtime, params: submit_chat(
-            sid, runtime, params.get("text") or "", bool(params.get("queued"))))
+            sid, runtime, params.get("text") or "", bool(params.get("queued")),
+            B["prompt_attachments"](runtime, params)))
 
     B["CHATS_HOOKS"].update({"add_message": G.add_message, "finish": finish})
     methods["session.create"] = create
@@ -142,7 +143,7 @@ def resume_chat(params):
             "info": {**session_model(stored), "running": runtime["running"]},
             **B["live_turn"](runtime), "running": runtime["running"], "session_key": stored,
             "status": "streaming" if runtime["running"] else "idle", "open_requests": B["open_requests"](sid),
-            "queued": {"user": runtime["queue"][0]["text"]} if runtime.get("queue") else None}
+            **B["queue_snapshot"](runtime)}
 
 
 def turn_elsewhere(stored, text, reply, seconds, display_kind="internal_notification", display_metadata=None):
@@ -182,15 +183,16 @@ def turn_elsewhere(stored, text, reply, seconds, display_kind="internal_notifica
     return True
 
 
-def submit_chat(sid, runtime, text, queued=False):
+def submit_chat(sid, runtime, text, queued=False, attachments=None):
     gated = B["submit_gate"](sid, runtime, text)
     if gated is not None:
         return gated
     with B["LOCK"]:
-        busy = runtime["running"]
-    if busy:
-        return B["busy_submit"](sid, text, queued)
-    B["start_turn"](sid, text, run_chat_turn)
+        if runtime["running"]:
+            return B["busy_submit"](sid, text, queued, attachments)
+        if attachments is not None:
+            runtime["held_images"] = attachments
+        B["start_turn"](sid, text, run_chat_turn)
     return {"status": "streaming"}
 
 

@@ -1114,8 +1114,10 @@ message is always in one of these states:
 
 Nothing is sent twice. Up Next keeps its order: Send Again, Talk, Send as Message and Try Again wait
 behind a running turn, a held chat and what already waits (`UpNext.goesNow`), with their skills,
-mentions and attachments. Photos staged for a prompt Hermes refused, or one that never went, are
-taken back (`image.detach`, `StagedImages`), so they never ride on the next message. Hermes sends
+mentions and attachments. Legacy photos staged for a prompt Hermes refused, or one that never went,
+are taken back (`image.detach`, `StagedImages`). The session authority instead attaches only the
+photos named in that prompt's `attachments` and reports its accepted queued prompts in `pending`.
+Hermes sends
 its queue one envelope per turn: words join a text-only head while nothing waits behind it, and a
 message with photos or files is always a turn of its own, so the tray lets go of only what each turn
 carries (`GatewayHeldQueue`). Stop empties Hermes's queue with the turn. Once the stopped turn

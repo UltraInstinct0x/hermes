@@ -1454,6 +1454,12 @@ final class BotRoster {
         return try await socket.request("prompt.submit", submit.params(sessionAuthority: await socket.sessionAuthority), timeout: timeout)
     }
 
+    func allowsPromptPhotos(_ count: Int) async throws -> Bool {
+        if count <= PromptSubmitContract.authorityPhotoLimit { return true }
+        let socket = try await liveSocket()
+        return PromptSubmitContract.allowsPhotoCount(count, sessionAuthority: await socket.sessionAuthority)
+    }
+
     /// The shared socket, once it can carry a request.
     private func liveSocket() async throws -> GatewaySocket {
         #if os(iOS)

@@ -854,12 +854,12 @@ def check_redirect(sid):
         raise Redirected(text)
 
 
-def busy_submit(sid, text, queued):
+def busy_submit(sid, text, queued, attachments=None):
     """Hermes' _handle_busy_submit: a client queue drain (`queued: true`) and anything with images is held
     for the next turn; plain text follows display.busy_input_mode (steer, interrupt → redirect, queue)."""
     with LOCK:
         runtime = RUNTIME[sid]
-        images = runtime.pop("attached_images", [])
+        images = runtime.pop("attached_images", []) if attachments is None else attachments
         media = len(images)
         mode = "queue" if queued or media else BUSY["mode"]
         if mode == "steer":
@@ -869,7 +869,7 @@ def busy_submit(sid, text, queued):
             redirect_or_steer(runtime, text)
             return {"status": "redirected"}
         queue = runtime.setdefault("queue", [])
-        if not media and len(queue) == 1 and not queue[0]["media"]:
+        if attachments is None and not media and len(queue) == 1 and not queue[0]["media"]:
             # `_enqueue_prompt`: words join a text-only head while nothing waits behind it, one turn.
             head = queue[0]
             head["text"] = f"{head['text']}\n\n{text}"
@@ -2140,7 +2140,7 @@ LEGACY_SUBMIT_KEYS = {
     "rebind_survivor_row_ids",
 }
 # Methods the authority has no handler for, answered -32601 (session_controls.py@v0.23.4:403).
-AUTHORITY_UNKNOWN = {"session.title"}
+AUTHORITY_UNKNOWN = {"session.title", "image.detach", "pdf.attach"}
 ADMISSIONS = {}  # (stored chat, submission id) -> the receipt it was admitted with
 
 
@@ -2251,6 +2251,13 @@ def method_session_list(params):
         return {"sessions": [session_ref(s) for s in mine[:limit]]}
 
 
+def queue_snapshot(runtime):
+    queue = runtime.get("queue", [])
+    if CONFIG.get("session_authority"):
+        return {"pending": [{"status": "queued", "text": entry["text"]} for entry in queue]}
+    return {"queued": {"user": queue[0]["text"]} if queue else None}
+
+
 def method_session_resume(params):
     stored = params.get("session_id") or ""
     profile = (params.get("profile") or "default").strip() or "default"
@@ -2272,12 +2279,12 @@ def method_session_resume(params):
             raise RPCError(4009, "session disconnect interrupt settling")
         omit = bool(params.get("omit_messages"))
         return {"session_id": sid, "resumed": stored, "message_count": len(session["messages"]),
+                **queue_snapshot(runtime),
                 "messages": [] if omit else session["messages"], "messages_omitted": omit,
                 "info": {"model": PROFILES[profile]["model"], "running": runtime["running"]},
                 **live_turn(runtime), "running": runtime["running"], "session_key": stored,
                 "started_at": session["started_at"], "status": "streaming" if runtime["running"] else "idle",
-                "open_requests": open_requests(sid),
-                "queued": {"user": runtime["queue"][0]["text"]} if runtime.get("queue") else None}
+                "open_requests": open_requests(sid)}
 
 
 def retire_undrained_queue_rows(rows):
@@ -2538,18 +2545,33 @@ def submit_prompt(sid, runtime, params):
             emit(sid, "error", {"message": hold_refusal(runtime["stored"])})
         threading.Thread(target=refuse, daemon=True).start()
         return {"status": "streaming"}
+    attachments = prompt_attachments(runtime, params)
     with LOCK:
-        busy = runtime["running"]
-    if busy:
-        return busy_submit(sid, text, bool(params.get("queued")))
+        if runtime["running"]:
+            return busy_submit(sid, text, bool(params.get("queued")), attachments)
     if CONFIG.get("agent_build"):
         # Hermes builds a chat's agent before it takes the prompt (tui_gateway `_announce_built_agent`
         # announces it with session.info, still idle), and on a loaded Mac that takes seconds: the
         # submit is answered, and the turn runs, only after.
         emit(sid, "session.info", {"running": False, "model": PROFILES[runtime["profile"]]["model"]})
         time.sleep(CONFIG["agent_build"])
-    start_turn(sid, text, run_turn)
+    with LOCK:
+        if attachments is not None:
+            runtime["held_images"] = attachments
+        start_turn(sid, text, run_turn)
     return {"status": "streaming"}
+
+
+def prompt_attachments(runtime, params):
+    if not CONFIG.get("session_authority"):
+        return None
+    refs = params.get("attachments", [])
+    staged = runtime.get("authority_images", {})
+    if (not isinstance(refs, list) or len(refs) > 10 or ("attachments" in params and not refs)
+            or any(not isinstance(ref, dict) or set(ref) != {"path", "mime"}
+                   or not isinstance(ref["path"], str) or staged.get(ref["path"]) != ref["mime"] for ref in refs)):
+        raise RPCError(4001, "invalid_params", {"reason": "invalid_params"})
+    return [ref["path"] for ref in refs]
 
 
 def method_session_interrupt(params):
@@ -2607,6 +2629,14 @@ def method_image_attach_bytes(params):
             subscribed = getattr(CURRENT, "peer", None) in runtime["peers"]
         if not subscribed:
             raise RPCError(4001, "permission_denied", {"reason": "permission_denied"})
+        filename = params.get("filename") or "image.png"
+        ext = pathlib.Path(filename).suffix.lower()
+        mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "image/png")
+        path = f"/home/user/.hermes/cache/images/upload_{uuid.uuid4().hex[:8]}{ext}"
+        with LOCK:
+            runtime.setdefault("authority_images", {})[path] = mime
+        return {"attached": True, "path": path, "mime": mime, "count": 1, "name": pathlib.Path(path).name}
     path = f"/home/user/.hermes/images/upload_{uuid.uuid4().hex[:8]}.png"
     with LOCK:
         runtime.setdefault("attached_images", []).append(path)

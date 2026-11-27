@@ -473,7 +473,10 @@ authority does: `gateway.ready` says `session_authority: true`, a `prompt.submit
 admission and never a second turn, every new message's receipt says `queued` (an idle chat's too;
 a steer says `started`), a closed session answers 4001 `not_found`, a `prompt.submit` from a socket
 that didn't create or resume the chat answers 4001 `permission_denied` (checked in that order, then
-the keys; `image.attach_bytes` is refused the same way), and `session.title` answers -32601. A
+the keys; `image.attach_bytes` is refused the same way), and `session.title` answers -32601.
+Authority uploads stage bytes without attaching them to the next prompt; `prompt.submit` must name
+each photo by path and MIME type, up to ten. Authority resume reports the waiting prompts in
+`pending`, not the legacy `queued` envelope. A
 `command.dispatch` without a session, or with one that is closed or of another profile than the one
 it names, answers 4001 `not_found`, and a command Hermes doesn't have answers 4001
 `unsupported_command` where the legacy dispatcher says 4018. The log prints each admission, each
@@ -1261,4 +1264,3 @@ running), Obsidian Memory (off), Langfuse (two keys missing), agent-ledger (pull
 homeassistant update that asks for more access in Hermes's words. `--plugin-catalog none` answers
 404 for the feed; `POST /api/mock/plugin-hub {failing, feed}` makes installs fail or the feed vanish
 while it runs. `-HERMES_APPS_TOOLS plugins` opens the hub, `plugins:suggested` the Mac's pane.
-

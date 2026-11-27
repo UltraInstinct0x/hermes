@@ -11,8 +11,15 @@ import Foundation
 ///   (`gateway/session_controls.py` `submission`). A repeated id is the same admission, never a
 ///   second turn, so the id is minted once per message and kept for every resend of it.
 public struct PromptSubmitContract: Sendable, Equatable {
+    public static let authorityPhotoLimit = 10
+
+    public static func allowsPhotoCount(_ count: Int, sessionAuthority: Bool) -> Bool {
+        !sessionAuthority || count <= authorityPhotoLimit
+    }
+
     public var sessionID: String
     public var text: String
+    public var images: StagedImages
     /// A busy chat queues the message rather than steering its turn with it.
     public var queued: Bool
     /// Keys both dispatchers take, such as a spoken turn's (`VoiceTurn.submitParams`).
@@ -25,13 +32,15 @@ public struct PromptSubmitContract: Sendable, Equatable {
         text: String,
         queued: Bool = true,
         extras: [String: JSONValue] = [:],
-        submissionID: String = UUID().uuidString
+        submissionID: String = UUID().uuidString,
+        images: StagedImages = StagedImages()
     ) {
         self.sessionID = sessionID
         self.text = text
         self.queued = queued
         self.extras = extras
         self.submissionID = submissionID
+        self.images = images
     }
 
     /// The request's params for a socket that is (`sessionAuthority`) or isn't served by the session
@@ -41,7 +50,10 @@ public struct PromptSubmitContract: Sendable, Equatable {
         params["session_id"] = .string(sessionID)
         params["text"] = .string(text)
         if queued { params["queued"] = .bool(true) }
-        if sessionAuthority { params["submission_id"] = .string(submissionID) }
+        if sessionAuthority {
+            params["submission_id"] = .string(submissionID)
+            if !images.references.isEmpty { params["attachments"] = .array(images.references) }
+        }
         return params
     }
 
