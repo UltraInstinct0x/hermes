@@ -1,3 +1,4 @@
+import HermesActivityKit
 import HermesKit
 import HermesPush
 import SwiftUI
@@ -33,8 +34,32 @@ struct NeedsYouRows: View {
                             }
                             .disabled(feed.answering.contains(row.id))
                         }
-                        if feed.localWorkspace(for: row, in: app) != nil {
-                            Button("Open Chat") { feed.openLocalChat(row, app: app, window: windowID) }
+                        if row.kind == "clarify" {
+                            if let card = feed.nativeClarifications[row.id] {
+                                ForEach(feed.inlineClarificationChoices(row), id: \.self) { choice in
+                                    Button(VisibleText.of(choice)) {
+                                        Task {
+                                            _ = await feed.answerNativeRequest(card.reference, selection: .clarification(choice),
+                                                                               shown: card.question.question)
+                                        }
+                                    }
+                                    .disabled(feed.answering.contains(row.id))
+                                }
+                            }
+                            if feed.localWorkspace(for: row, in: app) != nil {
+                                Button("Type an answer") {
+                                    if let conversation = feed.openLocalChat(row, app: app, window: windowID) {
+                                        Task { await feed.openClarification(row, in: conversation) }
+                                    }
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        } else if feed.localWorkspace(for: row, in: app) != nil {
+                            Button("Open Chat") {
+                                if let conversation = feed.openLocalChat(row, app: app, window: windowID), row.kind == "approval" {
+                                    Task { await feed.openApproval(row, in: conversation) }
+                                }
+                            }
                                 .buttonStyle(.borderless)
                         }
                     }
@@ -130,12 +155,14 @@ struct NeedsYouRows: View {
 
     private func historyDetail(_ row: LedgerRow) -> String {
         switch row.state {
-        case "answered": NeedsYouFeed.answeredBy(row.answeredBy)
+        case "answered":
+            RequestActivityPresentation.finalLine(row.answeredBy == nil ? .answered : .answeredElsewhere,
+                                                  answeredBy: row.answeredBy?.label)
         case "settled": String(localized: "Resolved")
         case "unverified": String(localized: "No longer tracked")
         case "lost_on_restart": String(localized: "Gateway restarted before this was answered")
-        case "expired": String(localized: "Timed out")
-        default: String(localized: "No longer pending")
+        case "expired": RequestActivityPresentation.finalLine(.expired, answeredBy: nil)
+        default: RequestActivityPresentation.finalLine(.noLongerWaiting, answeredBy: nil)
         }
     }
 }

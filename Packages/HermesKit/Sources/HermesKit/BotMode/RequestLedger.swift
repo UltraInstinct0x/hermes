@@ -42,8 +42,46 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
     }
 
     public func approval(in snapshot: JSONValue) -> ApprovalRequest? {
+        nativeApproval(in: snapshot)?.approval ?? legacyApproval(in: snapshot)
+    }
+
+    public func legacyApproval(in snapshot: JSONValue) -> ApprovalRequest? {
         guard kind == "approval", let request = openRequest(in: snapshot) else { return nil }
         return GatewayTurnDecoder.approval(from: request)
+    }
+
+    public func nativeApproval(in snapshot: JSONValue, generation: Int? = nil) -> NativeApproval? {
+        guard kind == "approval", state == "open", !requestID.hasPrefix("srq-"), let sessionID,
+              let prompt = Self.nativePrompt(in: snapshot, sessionID: sessionID, requestID: requestID,
+                                             generation: generation, kind: kind),
+              let offered = prompt["choices"]?.arrayValue,
+              var approval: ApprovalRequest = try? RequestLedgerClient.decode(prompt),
+              let generation = approval.executionGeneration else { return nil }
+        approval.requestID = requestID
+        approval.choices = approval.choices.filter { offered.contains(.string($0.rawValue)) }
+        guard !approval.choices.isEmpty else { return nil }
+        return NativeApproval(approval: approval, command: prompt["command"]?.stringValue, generation: generation,
+                              isPlainCommand: prompt["tool_name"]?.stringValue == "terminal"
+                                  && prompt["smart_denied"]?.boolValue == false && prompt["edit"] == nil)
+    }
+
+    public struct NativeApproval: Sendable {
+        public let approval: ApprovalRequest
+        public let command: String?
+        public let generation: Int
+        public let isPlainCommand: Bool
+    }
+
+    public static func nativePrompt(in snapshot: JSONValue, sessionID: String, requestID: String,
+                                    generation: Int?, kind: String) -> JSONValue? {
+        guard !sessionID.isEmpty, !requestID.isEmpty, snapshot["session_id"]?.stringValue == sessionID,
+              let liveGeneration = snapshot["execution_generation"]?.doubleValue.flatMap(Int.init(exactly:)),
+              liveGeneration >= 0, generation == nil || generation == liveGeneration else { return nil }
+        let matches = snapshot["prompts"]?.arrayValue?.filter {
+            $0["prompt_id"]?.stringValue == requestID && $0["kind"]?.stringValue == kind
+                && $0["execution_generation"]?.doubleValue == Double(liveGeneration)
+        } ?? []
+        return matches.count == 1 ? matches[0] : nil
     }
 
     public func openRequest(in snapshot: JSONValue) -> GatewayServerRequest? {
@@ -54,6 +92,17 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
             return .init(id: requestID, method: kind, params: params)
         }
         return nil
+    }
+
+    public func frameClarificationChoice(in snapshot: JSONValue, questionID: String, shown: String, answer: String) -> JSONValue? {
+        guard kind == "clarify", let sessionID, !sessionID.isEmpty,
+              ["session_id", "stored_session_id", "resumed"].contains(where: { snapshot[$0]?.stringValue == sessionID }),
+              let frame = openRequest(in: snapshot),
+              let request = HermesRequest.parse(frame), case .clarify(let questions) = request.kind,
+              questions.count == 1, let question = questions.first, question.id == questionID,
+              question.question == shown, !question.multiSelect,
+              frame.params["answers"]?[questionID] == nil, question.choices.contains(answer) else { return nil }
+        return .object(["answers": .object([questionID: .string(answer)])])
     }
 
     enum CodingKeys: String, CodingKey {
@@ -188,6 +237,29 @@ public struct LedgerSnapshot: Decodable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case open, recent, sources, openCount = "open_count"
+    }
+
+    public enum Lookup: Equatable, Sendable {
+        case pending(LedgerRow)
+        case notPending
+        case unavailable
+    }
+
+    public func lookup(gatewayID: String, profileID: String, sessionID: String, requestID: String) -> Lookup {
+        let matches = (open + recent).filter {
+            $0.gatewayID == gatewayID && ($0.profileID ?? $0.profile) == profileID
+                && $0.sessionID == sessionID && $0.requestID == requestID
+        }
+        if matches.count == 1, let row = matches.first {
+            if row.state == "open" { return .pending(row) }
+            if row.state == "settled" || LedgerHistory.closedStates.contains(row.state) { return .notPending }
+            return .unavailable
+        }
+        guard matches.isEmpty,
+              sources?.contains(where: {
+                  $0.gatewayID == gatewayID && $0.profileID == profileID && $0.state == .live
+              }) == true else { return .unavailable }
+        return .notPending
     }
 
     public static func merge(_ snapshots: [Self]) -> Self {

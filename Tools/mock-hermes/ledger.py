@@ -82,7 +82,9 @@ class Ledger:
             prompt = "\n".join(value for key in ("command", "description") if (value := params.get(key))) or None
             choices = params.get("choices")
         elif kind == "clarify":
-            choices = params.get("questions") or []
+            choices = params.get("questions") or (
+                [{"qid": rid, "question": params["question"], "choices": params.get("choices") or []}]
+                if "question" in params else [])
             prompt = "\n".join(q.get("question") or "" for q in choices) or None
         row = {"request_id": rid, "kind": kind, "profile": profile, "session_id": session,
                "session_key": session, "call_id": None, "bot_key": None, "state": "open",
@@ -147,6 +149,8 @@ class Ledger:
                     return {"status": "expired"}
                 raise self.problem(4065, "no longer pending", {"settlement": dict(row)} if row else None)
             entry = self.b["PENDING"][row["request_id"]]
+            if "native" in entry:
+                raise self.problem(4002, "this request must be answered in its chat")
             if canonical and row["kind"] not in ("approval", "clarify"):
                 raise self.problem(4002, "this request must be answered in its chat")
             if row["kind"] == "approval" and ("all" in result or

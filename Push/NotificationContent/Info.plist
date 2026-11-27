@@ -9,6 +9,8 @@
 			<!-- Approvals and questions, plus their per-gateway slots (NotificationCatalog.slotCount). -->
 			<key>UNNotificationExtensionCategory</key>
 			<array>
+				<string>hermes.request.approval</string>
+				<string>hermes.request.question</string>
 				<string>APPROVAL</string>
 				<string>APPROVAL.0</string>
 				<string>APPROVAL.1</string>

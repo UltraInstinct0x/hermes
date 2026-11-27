@@ -93,6 +93,10 @@ the design's component names, used in code comments.
   or key for it is not sent, and the chat says "Not sent · already answered on another device".
   Questions, approvals, secrets, sudo and the vault prompts all work this way. The mock settles one
   as another device would with `POST /api/mock/answer-elsewhere {"method"}`.
+- Native approval and clarify cards opened from Needs You or a Lock Screen link are checked
+  against the session's `prompts` snapshot, not `open_requests`. While one is shown and the chat
+  moves on, `session.resume` with `omit_messages` refreshes that snapshot. If the exact prompt and
+  generation are no longer listed, the card leaves with "No longer waiting".
 
 ## 2. Request to card
 

@@ -138,7 +138,9 @@ def resume_chat(params):
         runtime = B["RUNTIME"][sid]
     with G.LOCK:
         count = len(G.MESSAGES.get(stored, []))
-    return {"session_id": sid, "resumed": stored, "message_count": count, "messages": [], "messages_omitted": True,
+    prompts = B["native_prompt_snapshot"](sid)
+    return {"session_id": stored if prompts.get("prompts") else sid, **prompts,
+            "resumed": stored, "message_count": count, "messages": [], "messages_omitted": True,
             "info": {**session_model(stored), "running": runtime["running"]},
             **B["live_turn"](runtime), "running": runtime["running"], "session_key": stored,
             "status": "streaming" if runtime["running"] else "idle", "open_requests": B["open_requests"](sid),
@@ -1101,6 +1103,10 @@ def run_chat_turn(sid, text):
     lower = text.lower()
     B["mock_warnings"](sid, text)
     time.sleep(0.3)
+
+    if (answer := B["run_native_request"](sid, lower)) is not None:
+        stream(sid, answer)
+        return finish(sid, stored, answer)
 
     if text.startswith("[The person invoked skills"):
         answer = "On it. I'll write a failing test for #123 first, fix it, then open the PR with `gh pr create`."

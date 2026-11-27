@@ -115,10 +115,32 @@ enum NeoNotificationRouting {
 
     nonisolated static func handle(_ response: UNNotificationResponse, completion: @escaping @Sendable () -> Void) -> Bool {
         guard let reply = BoxRequestNotifications.reply(userInfo: response.notification.request.content.userInfo,
-                                                        action: response.actionIdentifier) else { return false }
+                                                        action: response.actionIdentifier,
+                                                        answersEnabled: NotificationCatalog.neoLockScreenAnswersEnabled) else { return false }
+        let identifier = response.notification.request.identifier
         Task { @MainActor in
             NeoBox.shared.push.notePushReceived()
-            if case .open(let botKey) = reply { NeoBox.shared.openRequestLink(.bot(key: botKey)) }
+            switch reply {
+            case .open(let botKey):
+                NeoBox.shared.openRequestLink(.bot(key: botKey))
+            case .lookup(let botKey, let requestId):
+                NeoBox.shared.openRequestLink(.lookup(botKey: botKey, requestId: requestId))
+            case .type(let reference):
+                NeoBox.shared.openRequestLink(.request(reference))
+            case .answer(let reference, let selection, let shown):
+                let result = await NeoBox.shared.submitRequest(reference, shown: shown, selection: selection)
+                if let outcome = result?.outcome {
+                    let center = UNUserNotificationCenter.current()
+                    center.removeDeliveredNotifications(withIdentifiers: [identifier])
+                    let receipt = UNMutableNotificationContent()
+                    receipt.title = RequestActivityPresentation.finalLine(outcome, answeredBy: nil, answeredChoice: selection.receiptChoice)
+                    if result?.opensRequest == true { receipt.userInfo = BoxRequestNotifications.openRequestInfo(reference) }
+                    try? await center.add(UNNotificationRequest(identifier: identifier, content: receipt, trigger: nil))
+                }
+                if result?.opensRequest == true { await UIApplication.shared.open(ActivityLink.request(reference).url) }
+            case .dismissed:
+                break
+            }
             completion()
         }
         return true
@@ -126,27 +148,76 @@ enum NeoNotificationRouting {
 }
 
 extension NeoBox: NeoActivityButtonHandling {
-    func answerApproval(botKey: String, requestId: String, shown: String, allow: Bool) async -> Bool {
-        await answerRequest(botKey: botKey, requestId: requestId, shown: shown, answer: .approval(allow ? .once : .deny))
+    func answerActivity(reference: RequestReference, shown: String, action: RequestActivityPresentation.Action) async -> Bool {
+        let matching = Activity<RequestActivityAttributes>.activities.filter { RequestReference($0.content.state) == reference }
+        guard matching.count == 1, let activity = matching.first else { return false }
+        let presentation = RequestActivityPresentation(activity.content.state)
+        guard presentation.actions(lockScreenAnswersEnabled: NotificationCatalog.neoLockScreenAnswersEnabled,
+                                   isStale: activity.activityState == .stale).contains(action),
+              presentation.textToVerify(for: action) == shown else { return false }
+        let selection: RequestSelection
+        switch action {
+        case .approve, .deny:
+            selection = .approval(allow: action == .approve)
+        case .choice(_, let label):
+            selection = .clarification(label, questionId: reference.isFrame ? activity.content.state.questionId : nil)
+        case .openToAnswer, .typeAnAnswer:
+            return false
+        }
+        return await submitRequest(reference, shown: shown, selection: selection)?.opensRequest == true
     }
 
-    func answerChoice(botKey: String, requestId: String, questionId: String, choice: String, shown: String) async -> Bool {
-        await answerRequest(botKey: botKey, requestId: requestId, shown: shown, answer: .clarify([questionId: .text(choice)]))
+    func openActivityRequest(_ reference: RequestReference, foregrounded: Bool) async {
+        if foregrounded, await UIApplication.shared.open(ActivityLink.request(reference).url) { return }
+        let alert = UNMutableNotificationContent()
+        alert.title = "Open Hermes Neo"
+        alert.body = "Tap to open this request in chat."
+        alert.userInfo = BoxRequestNotifications.openRequestInfo(reference)
+        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(
+            identifier: "neo-open-request-" + ActivityLink.request(reference).url.absoluteString, content: alert, trigger: nil))
+    }
+
+    func submitRequest(_ reference: RequestReference, shown: String, selection: RequestSelection) async
+        -> (outcome: RequestActivityAttributes.ContentState.Outcome?, opensRequest: Bool)? {
+        guard NotificationCatalog.neoLockScreenAnswersEnabled,
+              let result = await answerRequest(reference, shown: shown, selection: selection) else { return nil }
+        guard let outcome = result.outcome else { return result }
+        for activity in Activity<RequestActivityAttributes>.activities {
+            var state = activity.content.state
+            guard RequestReference(state) == reference, state.outcome == nil else { continue }
+            state.outcome = outcome
+            if outcome == .answered { state.answeredChoice = selection.receiptChoice }
+            await activity.update(ActivityContent(state: state, staleDate: nil))
+        }
+        return result
+    }
+}
+
+private extension RequestSelection {
+    var receiptChoice: String? {
+        if case .clarification(let answer, _) = self { return VisibleText.of(answer) }
+        return nil
     }
 }
 
 #if DEBUG
 enum NeoRequestActivityDemo {
     static func startIfAsked() async {
-        guard LaunchFlags.take("NEO_REQUEST_ACTIVITY_DEMO") != nil else { return }
+        guard let mode = LaunchFlags.take("NEO_REQUEST_ACTIVITY_DEMO") else { return }
+        #if targetEnvironment(simulator)
+        PushShared.current.defaults.set(mode != "1", forKey: "NEO_LOCK_SCREEN_ANSWER_DEMO")
+        #endif
         for activity in Activity<RequestActivityAttributes>.activities {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
         let now = Date()
+        let question = mode == "clarify"
         let state = RequestActivityAttributes.ContentState(
-            botKey: "demo::hermes", requestId: "demo-approval", botName: "Hermes",
-            style: .approval, detail: "swift test --filter RequestTests", since: now,
-            moreWaiting: 1)
+            botKey: "demo::hermes", requestId: mode == "1" ? "demo-request" : "demo-answer-request", botName: "Hermes",
+            style: question ? .question : .approval, detail: question ? "Which report should I open?" : "git status",
+            since: now, choices: question ? ["Weekly", "Monthly"] : [], moreWaiting: 1,
+            sessionId: "demo-session", executionGeneration: 1, command: question ? nil : "git status",
+            approvalKind: question ? nil : "command")
         do {
             _ = try Activity.request(attributes: RequestActivityAttributes(),
                                      content: ActivityContent(state: state, staleDate: nil), pushType: nil)

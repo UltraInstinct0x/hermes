@@ -7,7 +7,7 @@ import HermesMacSupport
 @main
 struct HermesApp: App {
     static let mainWindow = "main"
-    @State private var model = AppModel()
+    @State private var model: AppModel
     /// The app-wide phase: active while any window is.
     @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
@@ -26,8 +26,13 @@ struct HermesApp: App {
     #endif
     #endif
 
-    #if DEBUG
     init() {
+        let model = AppModel()
+        _model = State(initialValue: model)
+        #if os(iOS)
+        neoBox.bindModel(model)
+        #endif
+        #if DEBUG
         // Debug logs (`-HERMES_SCROLL_LOG` and the like) reach a file a line at a time: written to
         // a file, stdout otherwise holds 4 KB, and loses it when the app is stopped.
         setvbuf(stdout, nil, _IOLBF, 0)
@@ -75,8 +80,8 @@ struct HermesApp: App {
             }
         }
         #endif
+        #endif
     }
-    #endif
 
     var body: some Scene {
         WindowGroup(id: Self.mainWindow) {

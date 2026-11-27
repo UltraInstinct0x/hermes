@@ -33,12 +33,8 @@ struct NeoRequestLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
-                        if !presentation.body.isEmpty {
-                            Text(VisibleText.of(presentation.body))
-                                .font(.subheadline)
-                                .lineLimit(2)
-                        }
                         RequestButtons(presentation: presentation, isStale: context.isStale)
+                            .frame(maxHeight: 108)
                     }
                 }
             } compactLeading: {
@@ -60,7 +56,9 @@ struct NeoRequestLiveActivity: Widget {
 }
 
 private func requestLink(_ state: RequestActivityAttributes.ContentState) -> ActivityLink {
-    state.botKey.isEmpty ? .waiting : .bot(key: state.botKey)
+    if let reference = RequestReference(state) { return .request(reference) }
+    if !state.botKey.isEmpty, !state.requestId.isEmpty { return .lookup(botKey: state.botKey, requestId: state.requestId) }
+    return state.botKey.isEmpty ? .waiting : .bot(key: state.botKey)
 }
 
 /// The leading icon: the app's mark while the request waits (the title says whether it is an approval, a question or
@@ -107,26 +105,17 @@ struct RequestLockScreenView: View {
                     .accessibilityHidden(true)
                 Text(presentation.title)
                     .font(.headline)
-                    .lineLimit(2)
+                    .lineLimit(1)
                 Spacer(minLength: 8)
                 if !isStale { RequestCountdownView(presentation: presentation).font(.headline.monospacedDigit()) }
-            }
-            if !presentation.body.isEmpty {
-                Text(VisibleText.of(presentation.body))
-                    .font(.subheadline)
-                    .lineLimit(3)
             }
             if isStale && presentation.state.outcome == nil {
                 Text("Not updating. Open Hermes Neo to answer.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            if let more = presentation.moreLine {
-                Text(more)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
             RequestButtons(presentation: presentation, isStale: isStale)
+                .frame(maxHeight: 100)
         }
         .accessibilityElement(children: .contain)
     }
@@ -140,38 +129,88 @@ struct RequestButtons: View {
 
     var body: some View {
         let state = presentation.state
-        let actions = presentation.actions(lockScreenAnswersEnabled: NotificationCatalog.lockScreenAnswersEnabled, isStale: isStale)
-        if !actions.isEmpty {
-            HStack(spacing: 8) {
-                ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
-                    switch action {
-                    case .approve:
-                        Button(intent: NeoApproveRequestIntent(botKey: state.botKey, requestId: state.requestId, shown: state.detail)) {
-                            label(for: action, symbol: "checkmark")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .accessibilityLabel(presentation.accessibilityLabel(for: action))
-                    case .deny:
-                        Button(role: .destructive, intent: NeoDenyRequestIntent(botKey: state.botKey, requestId: state.requestId, shown: state.detail)) {
-                            label(for: action, symbol: "xmark")
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel(presentation.accessibilityLabel(for: action))
-                    case .choice(_, let choice):
-                        Button(intent: NeoAnswerChoiceIntent(botKey: state.botKey, requestId: state.requestId, questionId: state.questionId ?? "", choice: choice, shown: state.detail)) {
-                            label(for: action, symbol: nil)
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel(presentation.accessibilityLabel(for: action))
-                    case .openToAnswer:
-                        Link(destination: requestLink(state).url) {
-                            label(for: action, symbol: "arrow.up.forward.app")
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel(presentation.accessibilityLabel(for: action))
-                    }
-                }
+        #if DEBUG && targetEnvironment(simulator)
+        let demo = state.botKey == "demo::hermes" && state.requestId == "demo-answer-request"
+        #else
+        let demo = false
+        #endif
+        let actions = presentation.actions(lockScreenAnswersEnabled: demo || NotificationCatalog.neoLockScreenAnswersEnabled, isStale: isStale)
+        ViewThatFits(in: .vertical) {
+            RequestActionContent(presentation: presentation, actions: actions, full: true)
+                .fixedSize(horizontal: false, vertical: true)
+            RequestActionContent(presentation: presentation, actions: fallback(for: actions), full: false)
+        }
+    }
+
+    private func fallback(for actions: [RequestActivityPresentation.Action]) -> [RequestActivityPresentation.Action] {
+        if actions.isEmpty { return [] }
+        return actions.contains(.typeAnAnswer) ? [.typeAnAnswer] : [.openToAnswer]
+    }
+}
+
+private struct RequestActionContent: View {
+    let presentation: RequestActivityPresentation
+    let actions: [RequestActivityPresentation.Action]
+    let full: Bool
+
+    private var shown: String {
+        actions.contains(.approve) ? presentation.state.command ?? "" : presentation.body
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !shown.isEmpty {
+                Text(VisibleText.of(shown))
+                    .font(.subheadline)
+                    .lineLimit(full && actions.contains(where: \.isInlineAnswer) ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            if actions.contains(where: \.isInlineAnswer) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 4) {
+                        inlineButton(at: 0)
+                        inlineButton(at: 1)
+                        inlineButton(at: 2)
+                        if actions.contains(.typeAnAnswer) {
+                            Link(destination: requestLink(presentation.state).url) {
+                                Text(presentation.title(for: .typeAnAnswer))
+                                    .font(.caption)
+                                    .frame(minHeight: 32)
+                            }
+                            .accessibilityLabel(presentation.accessibilityLabel(for: .typeAnAnswer))
+                        }
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    button(for: actions.contains(.typeAnAnswer) ? .typeAnAnswer : .openToAnswer)
+                }
+            } else if let action = actions.first {
+                button(for: action)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func inlineButton(at index: Int) -> some View {
+        if actions.indices.contains(index), actions[index].isInlineAnswer { button(for: actions[index]) }
+    }
+
+    @ViewBuilder
+    private func button(for action: RequestActivityPresentation.Action) -> some View {
+        switch action {
+        case .approve, .deny, .choice:
+            if let reference = RequestReference(presentation.state), let text = presentation.textToVerify(for: action) {
+                Button(intent: NeoAnswerRequestIntent(reference: reference, shown: text, action: action)) {
+                    label(for: action, symbol: action == .approve ? "checkmark" : action == .deny ? "xmark" : nil)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel(presentation.accessibilityLabel(for: action))
+            }
+        case .openToAnswer, .typeAnAnswer:
+            Link(destination: requestLink(presentation.state).url) {
+                label(for: action, symbol: "arrow.up.forward.app")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel(presentation.accessibilityLabel(for: action))
         }
     }
 
@@ -186,6 +225,15 @@ struct RequestButtons: View {
         }
         .lineLimit(1)
         .minimumScaleFactor(0.8)
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .frame(minHeight: 32)
+    }
+}
+
+private extension RequestActivityPresentation.Action {
+    var isInlineAnswer: Bool {
+        switch self {
+        case .approve, .deny, .choice: true
+        case .openToAnswer, .typeAnAnswer: false
+        }
     }
 }

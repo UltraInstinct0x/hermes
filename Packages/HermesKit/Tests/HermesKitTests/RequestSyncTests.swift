@@ -41,4 +41,33 @@ struct RequestSyncTests {
         // No list at all (an older Hermes) is not "nothing open".
         #expect(RequestSync.openIDs(nil) == nil)
     }
+
+    @Test func nativeCardsOnlyEndWithAnOwningPromptSnapshot() {
+        func ended(_ prompts: [JSONValue]?, session: String = "chat", kind: String = "approval") -> Bool {
+            var snapshot: [String: JSONValue] = ["session_id": .string(session), "open_requests": .array([])]
+            if let prompts { snapshot["prompts"] = .array(prompts) }
+            return RequestSync.nativePromptEnded(in: .object(snapshot), sessionID: "chat", promptID: "prompt",
+                                                 generation: 7, kind: kind)
+        }
+        let approval: JSONValue = .object(["prompt_id": .string("prompt"), "kind": .string("approval"),
+                                           "execution_generation": .number(7)])
+        let reusedID: JSONValue = .object(["prompt_id": .string("prompt"), "kind": .string("approval"),
+                                           "execution_generation": .number(8)])
+        #expect(!ended([approval]))
+        #expect(ended([]))
+        #expect(ended([], kind: "clarify"))
+        #expect(ended([reusedID]))
+        #expect(!ended(nil))
+        #expect(!ended([], session: "other"))
+    }
+
+    @Test func aStoredSessionResumeCanReturnARuntimeAliasAfterSettlement() {
+        let snapshot: JSONValue = .object([
+            "session_id": .string("runtime"), "resumed": .string("stored-chat"), "prompts": .array([]),
+        ])
+        #expect(RequestSync.nativePromptEnded(in: snapshot, sessionID: "stored-chat", promptID: "prompt",
+                                             generation: 7, kind: "clarify"))
+        #expect(!RequestSync.nativePromptEnded(in: snapshot, sessionID: "other-chat", promptID: "prompt",
+                                              generation: 7, kind: "clarify"))
+    }
 }

@@ -3,6 +3,67 @@ import Testing
 @testable import HermesKit
 
 @Suite struct RequestLedgerTests {
+    @Test func aMissingRequestNeedsCoverageFromItsOwnLedger() throws {
+        let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
+            {"request_id":"target","session_id":"chat","gateway_id":"owner","profile":"bot","kind":"approval","state":"open","created_at":2}
+            """)))
+        func lookup(_ sources: [LedgerSource], open: [LedgerRow] = []) -> LedgerSnapshot.Lookup {
+            LedgerSnapshot(open: open, recent: [], openCount: open.count, sources: sources)
+                .lookup(gatewayID: "owner", profileID: "bot", sessionID: "chat", requestID: "target")
+        }
+        let owner = LedgerSource.ID(gatewayID: "owner", profileID: "bot")
+        let other = LedgerSource(id: .init(gatewayID: "other", profileID: "bot"), state: .live)
+        #expect(lookup([other, .init(id: owner, state: .offline)]) == .unavailable)
+        #expect(lookup([other]) == .unavailable)
+        #expect(lookup([other, .init(id: owner, state: .live)]) == .notPending)
+        #expect(lookup([.init(id: owner, state: .live)], open: [row]) == .pending(row))
+    }
+
+    @Test func anExactSettledLedgerRowIsNotPending() throws {
+        func lookup(_ state: String, request: String = "target") throws -> LedgerSnapshot.Lookup {
+            let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
+                {"request_id":"\(request)","session_id":"chat","gateway_id":"owner","profile":"bot",
+                 "kind":"approval","state":"\(state)","created_at":2}
+                """)))
+            return LedgerSnapshot(open: [], recent: [row], openCount: 0, sources: nil)
+                .lookup(gatewayID: "owner", profileID: "bot", sessionID: "chat", requestID: "target")
+        }
+        #expect(try lookup("settled") == .notPending)
+        #expect(try lookup("settled", request: "different") == .unavailable)
+        #expect(try lookup("unverified") == .unavailable)
+    }
+
+    @Test func nativeApprovalUsesCanonicalPromptIdentityAndOfferedChoices() throws {
+        let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
+            {"request_id":"native-id","session_id":"session-1","profile":"default","kind":"approval","state":"open","created_at":2}
+            """)))
+        let snapshot = try #require(JSONValue.parse("""
+            {"session_id":"session-1","execution_generation":7,"prompts":[
+              {"prompt_id":"different","kind":"approval","execution_generation":7,"command":"git status","choices":["deny"]},
+              {"prompt_id":"native-id","kind":"approval","execution_generation":7,"command":"git status","choices":["once","deny"]}
+            ]}
+            """))
+        let approval = try #require(row.approval(in: snapshot))
+        #expect(approval.id == "native-id")
+        #expect(approval.executionGeneration == 7)
+        #expect(approval.command == "git status")
+        #expect(approval.choices == [.once, .deny])
+        #expect(row.nativeApproval(in: snapshot, generation: 7)?.isPlainCommand == false)
+        #expect(row.nativeApproval(in: snapshot, generation: 6) == nil)
+        #expect(row.legacyApproval(in: snapshot) == nil)
+
+        let prompt = try #require(snapshot["prompts"]?.arrayValue?.last)
+        func live(_ session: String, _ generation: Double, _ prompts: [JSONValue]) -> JSONValue {
+            .object(["session_id": .string(session), "execution_generation": .number(generation), "prompts": .array(prompts)])
+        }
+        #expect(row.approval(in: live("wrong-session", 7, [prompt])) == nil)
+        #expect(row.approval(in: live("session-1", 6, [prompt])) == nil)
+        #expect(row.approval(in: live("session-1", 7.5, [prompt])) == nil)
+        #expect(row.approval(in: live("session-1", 7, [prompt, prompt])) == nil)
+        #expect(row.approval(in: live("session-1", 7, [])) == nil)
+        #expect(row.approval(in: .object(["prompts": .array([prompt])])) == nil)
+    }
+
     @Test func approvalReadsSafetyFromTheExactLiveFrame() throws {
         let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
             {"ledger_id":"target","request_id":"srq-target","profile":"default","kind":"approval","state":"open","created_at":2}
@@ -40,6 +101,26 @@ import Testing
             """))) as LedgerSnapshot
         #expect(ExactClarifyAnswer.questions(in: ledger, ledgerID: "b")?.first?["qid"] == .string("two"))
         #expect(ExactClarifyAnswer.questions(in: ledger, ledgerID: "second") == nil)
+    }
+
+    @Test func frameClarificationMatchesTheStoredSessionInLegacyResume() throws {
+        let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
+            {"request_id":"srq-target","session_id":"stored","profile":"default","kind":"clarify","state":"open","created_at":2}
+            """)))
+        func resume(_ stored: String, _ requestID: String = "srq-target") throws -> JSONValue {
+            try #require(JSONValue.parse("""
+                {"session_id":"runtime","resumed":"\(stored)","open_requests":[
+                  {"id":"\(requestID)","method":"clarify","params":{"questions":[{"qid":"region","question":"Which region?","choices":["US","EU"]}]}}
+                ]}
+                """))
+        }
+        let snapshot = try resume("stored")
+        #expect(row.frameClarificationChoice(in: snapshot, questionID: "region", shown: "Which region?", answer: "EU")
+            == .object(["answers": .object(["region": .string("EU")])]))
+        #expect(row.frameClarificationChoice(in: try resume("other"), questionID: "region", shown: "Which region?", answer: "EU") == nil)
+        #expect(row.frameClarificationChoice(in: try resume("stored", "srq-other"),
+                                             questionID: "region", shown: "Which region?", answer: "EU") == nil)
+        #expect(row.frameClarificationChoice(in: snapshot, questionID: "region", shown: "Which region?", answer: "") == nil)
     }
 
     private actor Gateway {

@@ -37,10 +37,11 @@ struct RequestCard: View {
 // MARK: - Clarify
 
 /// `clarifySingle`, `clarifyMulti`, `clarifySteps`, `clarifyFree`.
-private struct ClarifyCard: View {
+struct ClarifyCard: View {
     let request: HermesRequest
     let questions: [HermesRequest.Question]
     let conversation: ConversationModel
+    var onAnswer: ((String) -> Void)? = nil
 
     @State private var step = 0
     @State private var answers: [String: String] = [:]
@@ -228,6 +229,17 @@ private struct ClarifyCard: View {
     }
 
     private func send(skippingCurrent: Bool = false) {
+        if let onAnswer {
+            let chosen = question.choices.filter { picked[question.id, default: []].contains($0) }
+            if question.multiSelect, !skippingCurrent, !chosen.isEmpty,
+               let data = try? JSONEncoder().encode(chosen),
+               let answer = String(data: data, encoding: .utf8) {
+                onAnswer(answer)
+            } else {
+                onAnswer(answers[question.id] ?? "")
+            }
+            return
+        }
         var result: [String: JSONValue] = [:]
         for question in questions {
             let chosen = question.choices.filter { picked[question.id, default: []].contains($0) }

@@ -1,4 +1,5 @@
 import Foundation
+import HermesActivityKit
 import Testing
 
 @testable import HermesBox
@@ -33,9 +34,79 @@ struct BoxRequestNotificationsTests {
         #expect(BoxRequestNotifications.reply(userInfo: ["botKey": "oracle::hermesbot"], action: "hermes.request.approve") == nil)
     }
 
+    @Test func aFollowUpAlertOpensTheExactRequestAndCannotAnswer() throws {
+        let ref = try #require(RequestReference(botKey: "oracle::hermesbot", requestId: "req-9",
+                                                sessionId: "session-1", executionGeneration: 7))
+        var info = BoxRequestNotifications.openRequestInfo(ref)
+        #expect(BoxRequestNotifications.reply(userInfo: info, action: BoxRequestNotifications.defaultAction) == .type(ref))
+        #expect(BoxRequestNotifications.reply(userInfo: info, action: BoxRequestNotifications.approveAction, answersEnabled: true)
+            == .open(botKey: ref.botKey))
+        info["requestId"] = "different"
+        #expect(BoxRequestNotifications.reply(userInfo: info, action: BoxRequestNotifications.defaultAction)
+            == .lookup(botKey: ref.botKey, requestId: "different"))
+    }
+
     @Test func theIdentifiersAreTheOnesTheBoxSends() {
         // box/bff/push-planner.mjs CATEGORIES
         #expect(BoxRequestNotifications.approvalCategory == "hermes.request.approval")
         #expect(BoxRequestNotifications.questionCategory == "hermes.request.question")
+    }
+
+    @Test func onlyExactPlainCommandsCanBeAnswered() throws {
+        var payload = alert
+        payload["sessionId"] = "session-1"
+        payload["executionGeneration"] = 7
+        payload["command"] = "git status"
+        payload["needsApp"] = false
+        let ref = try #require(RequestReference(botKey: "oracle::hermesbot", requestId: "req-9",
+                                                 sessionId: "session-1", executionGeneration: 7))
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.approveAction, answersEnabled: true) == nil)
+        payload["approvalKind"] = "command"
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.approveAction) == nil)
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.approveAction, answersEnabled: true)
+            == .answer(ref, .approval(allow: true), shown: "git status"))
+        payload["approvalKind"] = "restricted"
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.denyAction, answersEnabled: true) == nil)
+    }
+
+    @Test func nativeQuestionChoicesAndTypingMatchTheDisplayedActions() throws {
+        var payload = alert
+        payload["aps"] = ["category": BoxRequestNotifications.questionCategory]
+        payload["sessionId"] = "session-1"
+        payload["executionGeneration"] = 7
+        payload["prompt"] = "Which color?"
+        payload["choices"] = ["Red", "Blue"]
+        payload["needsApp"] = false
+        let ref = try #require(RequestReference(botKey: "oracle::hermesbot", requestId: "req-9",
+                                                 sessionId: "session-1", executionGeneration: 7))
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: "hermes.request.choice.1", answersEnabled: true)
+            == .answer(ref, .clarification("Blue"), shown: "Which color?"))
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: "hermes.request.choice.2", answersEnabled: true) == nil)
+        payload["needsApp"] = true
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: BoxRequestNotifications.typeAction, answersEnabled: true) == .type(ref))
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: "hermes.request.choice.1", answersEnabled: true) == nil)
+    }
+
+    @Test func restrictedBoxApprovalOpensByLookupWithoutAnswerIdentity() {
+        let payload: [AnyHashable: Any] = [
+            "aps": ["alert": ["title": "Hermes Bot needs your approval", "body": "git status"], "sound": "default",
+                    "thread-id": "oracle::hermesbot"],
+            "botKey": "oracle::hermesbot", "requestId": "native-approval", "approvalKind": "restricted", "needsApp": true,
+        ]
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: "com.apple.UNNotificationDefaultActionIdentifier")
+            == .lookup(botKey: "oracle::hermesbot", requestId: "native-approval"))
+        #expect(BoxRequestNotifications.contentState(payload) == nil)
+    }
+
+    @Test func frameChoiceKeepsItsQuestionIDAndUsesTheAlertBody() throws {
+        let payload: [AnyHashable: Any] = [
+            "aps": ["category": BoxRequestNotifications.questionCategory, "alert": ["body": "Which region?"]],
+            "botKey": "oracle::hermesbot", "requestId": "srq-frame", "sessionId": "s1",
+            "choices": ["US", "EU"], "questionId": "q1", "needsApp": false,
+        ]
+        let ref = try #require(RequestReference(botKey: "oracle::hermesbot", requestId: "srq-frame",
+                                                 sessionId: "s1", executionGeneration: nil))
+        #expect(BoxRequestNotifications.reply(userInfo: payload, action: "hermes.request.choice.0", answersEnabled: true)
+            == .answer(ref, .clarification("US", questionId: "q1"), shown: "Which region?"))
     }
 }

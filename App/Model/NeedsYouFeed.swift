@@ -1,8 +1,8 @@
 import Foundation
+import HermesActivityKit
 import HermesKit
 import Observation
 #if os(iOS)
-import HermesActivityKit
 import HermesBox
 import HermesPush
 #endif
@@ -42,12 +42,25 @@ final class NeedsYouFeed {
     private(set) var receipts: [LedgerRow.ID: String] = [:]
     private(set) var requestNames: [LedgerRow.ID: RequestNames] = [:]
     private(set) var lookupRetries: [LedgerRow.ID: Int] = [:]
+    private(set) var nativeClarifications: [LedgerRow.ID: NativeClarification] = [:]
+
+    struct NativeClarification: Sendable, Equatable {
+        let reference: RequestReference
+        let question: HermesRequest.Question
+    }
+
+    struct NativeApproval: Sendable {
+        let reference: RequestReference
+        let prompt: LedgerRow.NativeApproval
+    }
 
     struct RequestNames: Sendable {
         let installID: String?
         let bot: String?
         let chat: String?
         let approval: ApprovalRequest?
+        var clarification: NativeClarification? = nil
+        var nativeApproval: NativeApproval? = nil
     }
 
     private enum Route: Sendable {
@@ -91,7 +104,7 @@ final class NeedsYouFeed {
                     snapshots.append(box)
                     boxes.insert(workspace.id)
                     liveBoxSources[workspace.id] = Set((box.sources ?? []).filter { $0.state == .live }.map(\.id))
-                    for row in box.open {
+                    for row in box.open + box.recent {
                         if let alias = row.gatewayID { routing.set(.box(backend, alias), for: row.id, gateway: workspace.id) }
                     }
                     for source in box.sources ?? [] where source.state == .unsupported {
@@ -144,6 +157,8 @@ final class NeedsYouFeed {
             workspace.ledgerSources = merged.sources ?? []
         }
         routes.replace(with: routing)
+        let active = Set(merged.open.map(\.id))
+        nativeClarifications = nativeClarifications.filter { active.contains($0.key) }
         lookupRetries = lookupRetries.filter { routing[$0.key] != nil }
         for id in failedLookups where routing[id] != nil && requestNames[id] == nil {
             lookupRetries[id, default: 0] += 1
@@ -203,13 +218,23 @@ final class NeedsYouFeed {
         guard routes[row.id] != nil, row.sessionID?.isEmpty == false, receipts[row.id] == nil,
               row.expiresAt.map({ $0 > Date.now.timeIntervalSince1970 }) ?? true,
               let approval = requestNames[row.id]?.approval,
-              !approval.smartDenied, !approval.isMemorySave, !approval.isPaymentFill else { return [] }
+              requestNames[row.id]?.nativeApproval.map({ $0.prompt.isPlainCommand }) != false,
+              InlineApproval.isOrdinary(smartDenied: approval.smartDenied, memorySave: approval.isMemorySave,
+                                        paymentFill: approval.isPaymentFill) else { return [] }
         return approval.choices.filter { choice in
             choice == .deny || choice == .once && approval.command.map(ApprovalCard.showsWholeInBatch) == true
         }
     }
 
     func answer(_ row: LedgerRow, choice: ApprovalChoice, workspaces: [BotWorkspace]) async {
+        if let card = requestNames[row.id]?.nativeApproval {
+            guard inlineChoices(row).contains(choice) else { return }
+            if await answerNativeRequest(card.reference, selection: .approval(allow: choice == .once),
+                                         shown: card.prompt.command ?? "", requiresPlainCommand: true) != nil {
+                await refresh(workspaces)
+            }
+            return
+        }
         guard inlineChoices(row).contains(choice), let session = row.sessionID, let route = routes[row.id],
               let gateway = routes.gateway(for: row.id),
               let shown = requestNames[row.id]?.approval,
@@ -218,7 +243,9 @@ final class NeedsYouFeed {
         do {
             let sent = try await Self.answerOnOwner(row, session: session, route: route) { snapshot in
                 guard self.routes.gateway(for: row.id) == gateway,
-                      let live = row.approval(in: snapshot), !live.smartDenied, !live.isMemorySave, !live.isPaymentFill,
+                      let live = row.legacyApproval(in: snapshot),
+                      InlineApproval.isOrdinary(smartDenied: live.smartDenied, memorySave: live.isMemorySave,
+                                                paymentFill: live.isPaymentFill),
                       live.command == shown.command, live.choices.contains(choice) else { return nil }
                 return .object(["choice": .string(choice.rawValue)])
             }
@@ -241,38 +268,189 @@ final class NeedsYouFeed {
         }
     }
 
-    #if os(iOS)
-    func answerFromLiveActivity(botKey: BotKey, requestId: String, shown: String, answer: WatchCompanion.RequestAnswer,
-                                workspaces: [BotWorkspace]) async -> Bool {
-        guard NotificationCatalog.lockScreenAnswersEnabled, RequestActivityPresentation.isExactRequestID(requestId),
-              !botKey.gatewayId.isEmpty, !botKey.profileId.isEmpty else { return false }
+    func lookupRequest(_ ref: RequestReference, workspaces: [BotWorkspace]) async -> LedgerSnapshot.Lookup {
         await ledgerRefresh.waitForNextSnapshot { await self.refreshSnapshot(workspaces) }
-        let matches = snapshot?.open.filter {
-            $0.requestID == requestId && $0.gatewayID == botKey.gatewayId && ($0.profileID ?? $0.profile) == botKey.profileId
-        } ?? []
-        guard matches.count == 1, let row = matches.first, let session = row.sessionID, let route = routes[row.id],
-              let gateway = routes.gateway(for: row.id), answering.insert(row.id).inserted else { return false }
-        defer { answering.remove(row.id) }
-        do {
-            return try await Self.answerOnOwner(row, session: session, route: route) { snapshot in
-                guard self.routes.gateway(for: row.id) == gateway,
-                      let live = WatchCompanion.RequestCard(row: row, snapshot: snapshot, gateway: gateway, source: "") else { return nil }
-                switch (live.content, answer) {
-                case (.approval(let command, _), .approval):
-                    guard !shown.isEmpty, command == shown else { return nil }
-                case (.clarify(let questions), .clarify(let answers)):
-                    guard questions.count == 1, let question = questions.first, !question.multiSelect,
-                          question.prompt == VisibleText.of(shown), case .text(let choice) = answers[question.id],
-                          question.choices.contains(choice) else { return nil }
-                default: return nil
-                }
-                return live.result(for: answer)
-            }
-        } catch {
-            return false
-        }
+        guard !Task.isCancelled else { return .unavailable }
+        return lookupRequest(ref)
     }
 
+    private func lookupRequest(_ ref: RequestReference) -> LedgerSnapshot.Lookup {
+        guard let separator = ref.botKey.range(of: "::") else { return .unavailable }
+        return snapshot?.lookup(gatewayID: String(ref.botKey[..<separator.lowerBound]),
+                                profileID: String(ref.botKey[separator.upperBound...]),
+                                sessionID: ref.sessionId, requestID: ref.requestId) ?? .unavailable
+    }
+
+    func resolveRequest(botKey: String, requestId: String, sessionId: String? = nil,
+                        workspaces: [BotWorkspace]) async -> LedgerRow? {
+        await ledgerRefresh.waitForNextSnapshot { await self.refreshSnapshot(workspaces) }
+        return requestRow(botKey: botKey, requestId: requestId, sessionId: sessionId, includeRecent: true)
+    }
+
+    private func requestRow(botKey: String, requestId: String, sessionId: String?, includeRecent: Bool = false) -> LedgerRow? {
+        guard let snapshot else { return nil }
+        let matches = (snapshot.open + (includeRecent ? snapshot.recent : [])).filter {
+            $0.requestID == requestId && (sessionId == nil || $0.sessionID == sessionId)
+                && "\($0.gatewayID ?? "")::\($0.profileID ?? $0.profile)" == botKey
+        }
+        return matches.count == 1 ? matches.first : nil
+    }
+
+    func answerNativeRequest(_ ref: RequestReference, selection: RequestSelection, shown: String,
+                             acceptsTypedAnswer: Bool = false, choiceOnCard: ApprovalChoice? = nil,
+                             requiresPlainCommand: Bool = false) async -> RequestActivityAttributes.ContentState.Outcome? {
+        let row: LedgerRow
+        switch lookupRequest(ref) {
+        case .pending(let pending): row = pending
+        case .notPending: return .noLongerWaiting
+        case .unavailable: return nil
+        }
+        guard let route = routes[row.id] else { return nil }
+        guard receipts[row.id] == nil, answering.insert(row.id).inserted else { return nil }
+        defer { answering.remove(row.id) }
+        if ref.isFrame {
+            guard row.kind == "clarify", case .clarification(let answer, let questionId) = selection,
+                  let questionId else { return .noLongerWaiting }
+            do {
+                let sent = try await Self.answerOnOwner(row, session: ref.sessionId, route: route) { snapshot in
+                    row.frameClarificationChoice(in: snapshot, questionID: questionId, shown: shown, answer: answer)
+                }
+                let outcome: RequestActivityAttributes.ContentState.Outcome = sent ? .answered : .noLongerWaiting
+                receipts[row.id] = RequestActivityPresentation.finalLine(outcome, answeredBy: nil)
+                return outcome
+            } catch {
+                return nil
+            }
+        }
+        guard let generation = ref.executionGeneration else { return .noLongerWaiting }
+        let outcome: RequestActivityAttributes.ContentState.Outcome
+        do {
+            outcome = try await Self.withSocket(route, receivesServerRequests: false) { socket in
+                let profile = row.profileID ?? row.profile
+                let live = try await socket.request("session.resume", Self.resume(ref.sessionId, profile: profile), timeout: .seconds(10))
+                guard let prompt = Self.nativePrompt(in: live, reference: ref, kind: row.kind) else { return .noLongerWaiting }
+                var params: [String: JSONValue] = [
+                    "session_id": .string(ref.sessionId), "execution_generation": .number(Double(generation)),
+                    "prompt_id": .string(ref.requestId), "profile": .string(profile),
+                ]
+                let method: String
+                let success: RequestActivityAttributes.ContentState.Outcome
+                switch selection {
+                case .approval(let allow):
+                    let choice = choiceOnCard ?? (allow ? .once : .deny)
+                    guard let approval = row.nativeApproval(in: live, generation: ref.executionGeneration),
+                          (approval.command ?? "") == shown, approval.approval.choices.contains(choice) else { return .noLongerWaiting }
+                    if choiceOnCard == nil {
+                        guard (!requiresPlainCommand || approval.isPlainCommand), prompt["edit"] == nil, !shown.isEmpty,
+                              InlineApproval.isOrdinary(smartDenied: approval.approval.smartDenied,
+                                                        memorySave: approval.approval.isMemorySave,
+                                                        paymentFill: approval.approval.isPaymentFill),
+                              choice == .deny || approval.approval.command.map(InlineApproval.showsWholeCommand) == true
+                        else { return .noLongerWaiting }
+                    }
+                    params["choice"] = .string(choice.rawValue)
+                    method = "approval.respond"
+                    success = switch choice {
+                    case .once: .allowedOnce
+                    case .session: .allowedForSession
+                    case .always: .allowedAlways
+                    case .deny: .denied
+                    }
+                case .clarification(let answer, _):
+                    guard row.kind == "clarify", prompt["question"]?.stringValue == shown,
+                          acceptsTypedAnswer || (!answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            && prompt["multi_select"]?.boolValue == false
+                            && prompt["choices"]?.arrayValue?.contains(.string(answer)) == true) else { return .noLongerWaiting }
+                    params["answer"] = .string(answer)
+                    method = "clarify.respond"
+                    success = .answered
+                }
+                let receipt = try await socket.request(method, params, timeout: .seconds(10))
+                guard receipt["prompt_id"]?.stringValue == ref.requestId else { throw URLError(.badServerResponse) }
+                switch receipt["status"]?.stringValue {
+                case "resolved": return success
+                case "already_resolved": return .noLongerWaiting
+                default: throw URLError(.badServerResponse)
+                }
+            }
+        } catch let error as GatewayRPCError where ["stale_generation", "approval_not_pending", "invalid_params"].contains(
+            error.data?["reason"]?.stringValue ?? error.message) {
+            outcome = .noLongerWaiting
+        } catch {
+            return nil
+        }
+        receipts[row.id] = RequestActivityPresentation.finalLine(outcome, answeredBy: nil)
+        return outcome
+    }
+
+    private nonisolated static func nativePrompt(in snapshot: JSONValue, reference: RequestReference, kind: String) -> JSONValue? {
+        LedgerRow.nativePrompt(in: snapshot, sessionID: reference.sessionId, requestID: reference.requestId,
+                               generation: reference.executionGeneration, kind: kind)
+    }
+
+    private nonisolated static func nativeApproval(_ row: LedgerRow, in snapshot: JSONValue) -> NativeApproval? {
+        guard let approval = row.nativeApproval(in: snapshot), let gateway = row.gatewayID,
+              let reference = RequestReference(botKey: "\(gateway)::\(row.profileID ?? row.profile)", requestId: row.requestID,
+                                               sessionId: row.sessionID, executionGeneration: approval.generation) else { return nil }
+        return NativeApproval(reference: reference, prompt: approval)
+    }
+
+    private nonisolated static func nativeClarification(_ row: LedgerRow, in snapshot: JSONValue) -> NativeClarification? {
+        guard let gateway = row.gatewayID,
+              let ref = RequestReference(botKey: "\(gateway)::\(row.profileID ?? row.profile)", requestId: row.requestID,
+                                         sessionId: row.sessionID, executionGeneration: snapshot["execution_generation"]?.truncatedIntValue),
+              let prompt = nativePrompt(in: snapshot, reference: ref, kind: "clarify"),
+              let text = prompt["question"]?.stringValue, !text.isEmpty,
+              let multiSelect = prompt["multi_select"]?.boolValue,
+              let rawChoices = prompt["choices"]?.arrayValue else { return nil }
+        let choices = rawChoices.compactMap(\.stringValue)
+        guard rawChoices.count == choices.count, Set(choices).count == choices.count else { return nil }
+        return NativeClarification(reference: ref, question: .init(id: ref.requestId, question: text, choices: choices, multiSelect: multiSelect))
+    }
+
+    func inlineClarificationChoices(_ row: LedgerRow) -> [String] {
+        guard receipts[row.id] == nil, row.expiresAt.map({ $0 > Date.now.timeIntervalSince1970 }) ?? true,
+              let q = nativeClarifications[row.id]?.question, !q.multiSelect,
+              q.choices.count <= RequestActivityPresentation.maxChoiceButtons,
+              q.question.count <= RequestActivityPresentation.detailLimit else { return [] }
+        return q.choices
+    }
+
+    func openClarification(_ row: LedgerRow, reference: RequestReference? = nil, in conversation: ConversationModel) async {
+        if let route = routes[row.id], let session = row.sessionID, row.state == "open" {
+            let profile = row.profileID ?? row.profile
+            let live = try? await Self.withRoute(route) {
+                try await $0("session.resume", Self.resume(session, profile: profile))
+            }
+            if let live, let card = Self.nativeClarification(row, in: live), reference == nil || reference == card.reference {
+                conversation.ledgerClarification = card
+                return
+            }
+            if reference == nil || reference?.isFrame == true,
+               let live, let frame = row.openRequest(in: live), let request = HermesRequest.parse(frame) {
+                conversation.receive(request)
+                conversation.shownWaitingID = "r:" + request.id
+                return
+            }
+        }
+        conversation.banner = .invalidResponse(RequestActivityPresentation.finalLine(.noLongerWaiting, answeredBy: nil))
+    }
+
+    func openApproval(_ row: LedgerRow, reference: RequestReference? = nil, in conversation: ConversationModel) async {
+        if let route = routes[row.id], let session = row.sessionID, row.state == "open" {
+            let live = try? await Self.withRoute(route) {
+                try await $0("session.resume", Self.resume(session, profile: row.profileID ?? row.profile))
+            }
+            if let live, let card = Self.nativeApproval(row, in: live), reference == nil || reference == card.reference {
+                conversation.ledgerApproval = card
+                return
+            }
+            if reference == nil, let live, row.legacyApproval(in: live) != nil { return }
+        }
+        conversation.recordRequestOutcome(.noLongerWaiting)
+    }
+
+    #if os(iOS)
     func watchRequests(_ workspaces: [BotWorkspace], usePublished: Bool) async -> WatchCompanion.Response {
         if !usePublished || snapshot == nil {
             await ledgerRefresh.waitForNextSnapshot { await self.refreshSnapshot(workspaces) }
@@ -352,20 +530,23 @@ final class NeedsYouFeed {
         return String(localized: "Answered by \(name)")
     }
 
-    func openLocalChat(_ row: LedgerRow, app: AppModel, window: UUID?) {
-        guard let workspace = localWorkspace(for: row, in: app), let session = row.sessionID else { return }
+    @discardableResult
+    func openLocalChat(_ row: LedgerRow, app: AppModel, window: UUID?) -> ConversationModel? {
+        guard let workspace = localWorkspace(for: row, in: app), let session = row.sessionID else { return nil }
         app.select(workspace.id, in: window)
         let profile = row.profileID ?? row.profile
         if let bot = workspace.roster?.bot(named: profile),
            bot.canonicalSession.map({ $0.id == session || $0.resolvedID == session }) == true {
             workspace.sidebarMode = .bots
             workspace.selection = .bot(profile)
+            return workspace.roster?.conversation(for: profile)
         } else {
             workspace.sidebarMode = .chats
             let key = workspace.unreadKey(forStoredSession: session)
             var chat = workspace.session(forKey: key) ?? HermesSession.opened(id: session)
             if !chat.hasRealTitle { chat.title = requestNames[row.id]?.chat }
             workspace.openLedgerChat(chat, profile: profile)
+            return workspace.conversation(forKey: chat.stableID)
         }
     }
 
@@ -400,17 +581,23 @@ final class NeedsYouFeed {
                 let chat = list["sessions"]?.arrayValue?.first {
                     $0["id"]?.stringValue == id || $0["resolved_id"]?.stringValue == id
                 }
-                let approval: ApprovalRequest?
-                if row.kind == "approval" {
+                var approval: ApprovalRequest?
+                var clarification: NativeClarification?
+                var nativeApproval: NativeApproval?
+                if row.state == "open", row.kind == "approval" || row.kind == "clarify" {
                     let snapshot = try await request("session.resume", Self.resume(id, profile: profile))
-                    approval = row.approval(in: snapshot)
-                } else {
-                    approval = nil
+                    nativeApproval = Self.nativeApproval(row, in: snapshot)
+                    approval = nativeApproval?.prompt.approval ?? row.legacyApproval(in: snapshot)
+                    if row.kind == "clarify" { clarification = Self.nativeClarification(row, in: snapshot) }
                 }
-                return RequestNames(installID: installID, bot: bot?.title, chat: chat?["title"]?.stringValue, approval: approval)
+                return RequestNames(installID: installID, bot: bot?.title, chat: chat?["title"]?.stringValue,
+                                    approval: approval, clarification: clarification, nativeApproval: nativeApproval)
             }
             guard !Task.isCancelled else { return }
             requestNames[row.id] = names
+            if snapshot?.open.contains(where: { $0.id == row.id }) == true {
+                nativeClarifications[row.id] = names.clarification
+            }
             failedLookups.remove(row.id)
         } catch {
             if !Task.isCancelled, requestNames[row.id] == nil { failedLookups.insert(row.id) }

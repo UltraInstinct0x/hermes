@@ -1,3 +1,5 @@
+import HermesActivityKit
+import HermesBox
 import HermesPush
 import SwiftUI
 import UIKit
@@ -9,7 +11,7 @@ import UserNotificationsUI
 /// A question's choices become its actions (`notificationActionsQuestion`), each answering in
 /// the background; the system menu can't hold more, so the rest stay in the app.
 final class NotificationViewController: UIViewController, UNNotificationContentExtension {
-    private var host: UIHostingController<RequestDetail>?
+    private var host: UIHostingController<AnyView>?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -18,6 +20,10 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
 
     func didReceive(_ notification: UNNotification) {
         let content = notification.request.content
+        if BoxRequestNotifications.isBoxNotification(content.userInfo) {
+            showBoxRequest(content)
+            return
+        }
         let shared = PushShared.current
         // What the envelope says, never the plain copy beside it, which the relay could have
         // written (`NotificationDelegate.notice(from:isRemote:)` in the app).
@@ -26,7 +32,39 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
         var notice = opened.notice
         notice.nameBot(chats: shared.botChats(gateway: opened.gateway.appID), names: shared.botNames(gateway: opened.gateway.appID))
         let gateway = opened.gateway.name
-        let detail = RequestDetail(notice: notice, gateway: gateway, received: notification.date)
+        show(AnyView(RequestDetail(notice: notice, gateway: gateway, received: notification.date)))
+        if notice.kind == .question {
+            extensionContext?.notificationActions = NotificationCatalog.actions(for: .question, choices: notice.actionChoices)
+        }
+    }
+
+    private func showBoxRequest(_ content: UNNotificationContent) {
+        let state = BoxRequestNotifications.contentState(content.userInfo)
+        let presentation = state.map(RequestActivityPresentation.init)
+        #if DEBUG && targetEnvironment(simulator)
+        let demo = state?.botKey == "demo::hermes" && state?.requestId == "demo-answer-request"
+        #else
+        let demo = false
+        #endif
+        let actions = presentation?.actions(lockScreenAnswersEnabled: demo || NotificationCatalog.neoLockScreenAnswersEnabled,
+                                             isStale: false) ?? []
+        let fullCommand = actions.contains(.approve) ? state?.command : nil
+        show(AnyView(VStack(alignment: .leading, spacing: 8) {
+            Text(content.title).font(.headline)
+            Text(VisibleText.of(fullCommand ?? state.flatMap { $0.detail.isEmpty ? nil : $0.detail } ?? content.body))
+                .font(fullCommand == nil ? .subheadline : .system(.subheadline, design: .monospaced))
+                .fixedSize(horizontal: false, vertical: true)
+        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)))
+        extensionContext?.notificationActions = actions.compactMap { action in
+            guard let presentation, action != .openToAnswer else { return nil }
+            let options: UNNotificationActionOptions = action == .typeAnAnswer ? [.foreground]
+                : action == .deny ? [.authenticationRequired, .destructive] : [.authenticationRequired]
+            return UNNotificationAction(identifier: BoxRequestNotifications.identifier(for: action),
+                                        title: VisibleText.of(presentation.title(for: action)), options: options)
+        }
+    }
+
+    private func show(_ detail: AnyView) {
         if let host {
             host.rootView = detail
         } else {
@@ -46,9 +84,6 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
             self.host = host
         }
         preferredContentSize = host?.view.sizeThatFits(CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude)) ?? preferredContentSize
-        if notice.kind == .question {
-            extensionContext?.notificationActions = NotificationCatalog.actions(for: .question, choices: notice.actionChoices)
-        }
     }
 
     override func preferredContentSizeDidChange(forChildContentContainer container: any UIContentContainer) {
