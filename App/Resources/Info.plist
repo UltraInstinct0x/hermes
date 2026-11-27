@@ -70,6 +70,8 @@
 	<string>$(HERMES_ICLOUD_KEY_VALUE_SYNC)</string>
 	<key>HermesAppGroup</key>
 	<string>$(HERMES_APP_GROUP)</string>
+	<key>HermesAPNsEnvironment</key>
+	<string>$(HERMES_APS_ENVIRONMENT)</string>
 	<key>HermesKeychainGroup</key>
 	<string>$(HERMES_KEYCHAIN_PREFIX)$(HERMES_KEYCHAIN_GROUP)</string>
 </dict>

@@ -368,27 +368,6 @@ final class PushCenter {
         return String(localized: "Waiting for Apple to give this device a push address.")
     }
 
-    /// `development` (the sandbox) or `production`, from the provisioning profile's APNs entitlement.
-    static var apnsEnvironment: String {
-        #if targetEnvironment(simulator)
-        return "development"
-        #else
-        if let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-           let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .isoLatin1),
-           let start = text.range(of: "<plist"), let end = text.range(of: "</plist>"),
-           let plist = try? PropertyListSerialization.propertyList(from: Data(text[start.lowerBound..<end.upperBound].utf8), format: nil) as? [String: Any],
-           let entitlements = plist["Entitlements"] as? [String: Any],
-           let environment = entitlements["aps-environment"] as? String {
-            return environment
-        }
-        #if DEBUG
-        return "development"
-        #else
-        return "production"
-        #endif
-        #endif
-    }
-
     // MARK: - Gateways
 
     /// Registers this device with a gateway's plugin (iPhone), or checks the plugin is there (Mac).
@@ -554,7 +533,7 @@ final class PushCenter {
         let info = Bundle.main.infoDictionary
         return AppPushClient.Device(
             id: shared.deviceID, token: token, topic: Bundle.main.bundleIdentifier ?? "",
-            environment: Self.apnsEnvironment, publicKey: key.publicKeyBase64,
+            environment: APNsEnvironment.current.rawValue, publicKey: key.publicKeyBase64,
             platform: UIDevice.current.userInterfaceIdiom == .pad ? "ipados" : "ios",
             name: UIDevice.current.name,
             appVersion: "\(info?["CFBundleShortVersionString"] as? String ?? "") (\(info?["CFBundleVersion"] as? String ?? ""))",

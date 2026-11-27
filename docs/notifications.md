@@ -93,7 +93,7 @@ chat, and an older Hermes gets the command without a session, as before. `/app-w
 
 | Command | Arguments | Answer |
 |---|---|---|
-| `register` | `device_id`, `token` (APNs, hex), `topic` (bundle id), `environment` (`development` / `production`, from the provisioning profile), `public_key` (base64 X25519), `platform` (`ios` / `ipados`), `name`, `app_version`, `preferences` | `ok`, `gateway {id, name}` (the relay installation id and the gateway's name), `relay` (`ok` or the error), `devices` |
+| `register` | `device_id`, `token` (APNs, hex), `topic` (bundle id), `environment` (`development` in Debug, `production` in Release, from the same build setting as `aps-environment`), `public_key` (base64 X25519), `platform` (`ios` / `ipados`), `name`, `app_version`, `preferences` | `ok`, `gateway {id, name}` (the relay installation id and the gateway's name), `relay` (`ok` or the error), `devices` |
 | `unregister` | `device_id` | `removed` |
 | `preferences` | `device_id`, `preferences` | the stored preferences |
 | `presence` | `device_id`, `state` (`foreground` with `session_id`, `running`, `away`), `live`, `sync` (with `away`: the chats to keep current, at most 20), `unread` and `muted` (with `away`: `{chats, rooms}`, the chats the app icon badge counts, one session id each, and the muted ones, when it counts unread chats) with `listed` (every chat its list shows, the only ones the plugin may add; 1.4.2), `unmarked` (the listed chats Hermes never marked, which it adds only once a `read` names them; 1.4.7), `badge_others` (what the person's other gateways add to the badge; plugin 1.4.0) and `badge` (what the icon shows as the app leaves; 1.4.5) | `open` (open requests), `read` (the last six hours' reads, as notices list them; 1.4.6) |

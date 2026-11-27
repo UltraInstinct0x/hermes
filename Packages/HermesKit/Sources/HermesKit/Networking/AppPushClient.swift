@@ -1,6 +1,18 @@
 import Foundation
 import HermesPush
 
+public enum APNsEnvironment: String, Sendable {
+    case development, production
+
+    public static let current = Self(entitlement: Bundle.main.object(forInfoDictionaryKey: "HermesAPNsEnvironment") as? String)
+
+    public init(entitlement: String?) {
+        self = entitlement.flatMap(Self.init(rawValue:)) ?? .production
+    }
+
+    public var boxValue: String { self == .development ? "sandbox" : "production" }
+}
+
 /// The `hermes-app-push` gateway plugin's commands (`Tools/hermes-app-push/README.md`).
 ///
 /// Hermes plugins can't add gateway RPC methods, so the app runs the plugin's `/app-push`
