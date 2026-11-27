@@ -132,7 +132,7 @@ enum NeoNotificationRouting {
                     let center = UNUserNotificationCenter.current()
                     center.removeDeliveredNotifications(withIdentifiers: [identifier])
                     let receipt = UNMutableNotificationContent()
-                    receipt.title = RequestActivityPresentation.finalLine(outcome, answeredBy: nil)
+                    receipt.title = RequestActivityPresentation.finalLine(outcome, answeredBy: nil, answeredChoice: selection.receiptChoice)
                     try? await center.add(UNNotificationRequest(identifier: identifier, content: receipt, trigger: nil))
                 }
             case .dismissed:
@@ -171,12 +171,20 @@ extension NeoBox: NeoActivityButtonHandling {
             var state = activity.content.state
             guard RequestReference(state) == reference, state.outcome == nil else { continue }
             state.outcome = outcome
+            if outcome == .answered { state.answeredChoice = selection.receiptChoice }
             await activity.update(ActivityContent(state: state, staleDate: nil))
         }
         if outcome == .noLongerWaiting {
             await UIApplication.shared.open(ActivityLink.request(reference).url)
         }
         return outcome
+    }
+}
+
+private extension RequestSelection {
+    var receiptChoice: String? {
+        if case .clarification(let answer, _) = self { return VisibleText.of(answer) }
+        return nil
     }
 }
 

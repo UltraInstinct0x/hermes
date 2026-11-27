@@ -334,6 +334,7 @@ final class NeedsYouFeed {
                     "prompt_id": .string(ref.requestId), "profile": .string(profile),
                 ]
                 let method: String
+                let success: RequestActivityAttributes.ContentState.Outcome
                 switch selection {
                 case .approval(let allow):
                     let choice = choiceOnCard ?? (allow ? .once : .deny)
@@ -349,6 +350,12 @@ final class NeedsYouFeed {
                     }
                     params["choice"] = .string(choice.rawValue)
                     method = "approval.respond"
+                    success = switch choice {
+                    case .once: .allowedOnce
+                    case .session: .allowedForSession
+                    case .always: .allowedAlways
+                    case .deny: .denied
+                    }
                 case .clarification(let answer, _):
                     guard row.kind == "clarify", prompt["question"]?.stringValue == shown,
                           acceptsTypedAnswer || (!answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -356,11 +363,12 @@ final class NeedsYouFeed {
                             && prompt["choices"]?.arrayValue?.contains(.string(answer)) == true) else { return .noLongerWaiting }
                     params["answer"] = .string(answer)
                     method = "clarify.respond"
+                    success = .answered
                 }
                 let receipt = try await socket.request(method, params, timeout: .seconds(10))
                 guard receipt["prompt_id"]?.stringValue == ref.requestId else { throw URLError(.badServerResponse) }
                 switch receipt["status"]?.stringValue {
-                case "resolved": return .answered
+                case "resolved": return success
                 case "already_resolved": return .noLongerWaiting
                 default: throw URLError(.badServerResponse)
                 }

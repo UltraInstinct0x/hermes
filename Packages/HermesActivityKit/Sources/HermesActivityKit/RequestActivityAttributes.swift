@@ -59,12 +59,14 @@ public struct RequestActivityAttributes: Codable, Hashable, Sendable {
         public var moreWaiting: Int
         public var outcome: Outcome?
         public var answeredBy: String?
+        public var answeredChoice: String?
 
         public init(
             botKey: String, requestId: String, botName: String, style: Style, detail: String = "", toolName: String? = nil,
             deadline: Date? = nil, since: Date, choices: [String] = [], needsApp: Bool = false, questionId: String? = nil,
             moreWaiting: Int = 0, outcome: Outcome? = nil, answeredBy: String? = nil,
-            sessionId: String? = nil, executionGeneration: Int? = nil, command: String? = nil, approvalKind: String? = nil
+            sessionId: String? = nil, executionGeneration: Int? = nil, command: String? = nil, approvalKind: String? = nil,
+            answeredChoice: String? = nil
         ) {
             self.botKey = botKey
             self.requestId = requestId
@@ -84,6 +86,7 @@ public struct RequestActivityAttributes: Codable, Hashable, Sendable {
             self.moreWaiting = moreWaiting
             self.outcome = outcome
             self.answeredBy = answeredBy
+            self.answeredChoice = answeredChoice
         }
     }
 }

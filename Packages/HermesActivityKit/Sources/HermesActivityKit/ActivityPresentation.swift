@@ -27,7 +27,7 @@ public struct RequestActivityPresentation: Equatable, Sendable {
     // MARK: words
 
     public var title: String {
-        if let outcome = state.outcome { return Self.finalLine(outcome, answeredBy: state.answeredBy) }
+        if let outcome = state.outcome { return Self.finalLine(outcome, answeredBy: state.answeredBy, answeredChoice: state.answeredChoice) }
         switch state.style {
         case .approval: return "\(state.botName) needs your approval"
         case .question: return "\(state.botName) has a question"
@@ -61,13 +61,13 @@ public struct RequestActivityPresentation: Equatable, Sendable {
         state.moreWaiting > 0 && state.outcome == nil ? "\(state.moreWaiting) more waiting" : nil
     }
 
-    public static func finalLine(_ outcome: State.Outcome, answeredBy: String?) -> String {
+    public static func finalLine(_ outcome: State.Outcome, answeredBy: String?, answeredChoice: String? = nil) -> String {
         switch outcome {
         case .allowedOnce: "Allowed once"
         case .allowedForSession: "Allowed for the session"
         case .allowedAlways: "Always allowed"
         case .denied: "Denied"
-        case .answered: "Answered"
+        case .answered: answeredChoice.map { clip($0, detailLimit) }.flatMap { $0.isEmpty ? nil : $0 } ?? "Answered"
         case .answeredElsewhere: "Answered on \(answeredBy.flatMap { $0.isEmpty ? nil : $0 } ?? "another device")"
         case .expired: "Expired"
         case .noLongerWaiting: "No longer waiting"

@@ -114,6 +114,18 @@ struct ActivityPresentationTests {
         #expect(RequestActivityPresentation(approval(more: 1)).moreLine == "1 more waiting")
     }
 
+    @Test func aChoiceReceiptNamesTheSelectedAnswer() {
+        var done = question()
+        done.outcome = .answered
+        done.answeredChoice = "Europe"
+        #expect(RequestActivityPresentation(done).title == "Europe")
+        done.answeredChoice = " "
+        #expect(RequestActivityPresentation(done).title == "Answered")
+        done.answeredChoice = "Europe"
+        done.outcome = .noLongerWaiting
+        #expect(RequestActivityPresentation(done).title == "No longer waiting")
+    }
+
     // MARK: buttons
 
     @Test func anApprovalOffersApproveOnceAndDeny() {
