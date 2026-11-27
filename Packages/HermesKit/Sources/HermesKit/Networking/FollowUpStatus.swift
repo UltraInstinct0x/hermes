@@ -22,9 +22,14 @@ public enum FollowUpStatus: String, Sendable, Equatable {
 }
 
 /// Hermes' own queue: the message it holds for the next turn (images, files, a steer or redirect
-/// while it compacts), as `session.resume` reports it (`queued: {user}`).
+/// while it compacts), as `session.resume` reports it.
 public enum GatewayQueue {
     public static func queuedPrompt(in snapshot: JSONValue) -> String? {
+        if case .array(let pending)? = snapshot["pending"] {
+            // A photo-only admission can have no text and still be held.
+            guard let head = pending.first(where: { $0["status"]?.stringValue == "queued" }) else { return nil }
+            return head["text"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
         let text = (snapshot["queued"]?["user"] ?? snapshot["queued_prompt"]?["user"])?.stringValue?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return text?.isEmpty == false ? text : nil

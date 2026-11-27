@@ -5157,9 +5157,8 @@ extension ConversationModel {
                let generation = snapshot["execution_generation"]?.truncatedIntValue {
                 gatewayExecution = (turnID, generation)
             }
-            // What Hermes holds for the next turn (`queued`): in the tray, read-only.
-            // Hermes shows only the first it holds: what this device sent stays, whole (`GatewayHeldQueue`).
-            let head = GatewayQueue.queuedPrompt(in: snapshot)
+            // What Hermes holds for the next turn: the tray keeps this device's whole messages.
+            let head = GatewayQueue.queuedPrompt(in: snapshot).map { $0.isEmpty ? String(localized: "Photo") : $0 }
             let heldNone = gatewayHeld.isEmpty
             let dropped = gatewayHeld.attached(head: head)
             if let head, heldNone {

@@ -2293,14 +2293,19 @@ def method_session_resume(params):
             DROP["settle"] -= 1
             raise RPCError(4009, "session disconnect interrupt settling")
         omit = bool(params.get("omit_messages"))
+        queue = runtime.get("queue", [])
+        if CONFIG.get("session_authority"):
+            queue_snapshot = {"execution_generation": runtime.get("execution_generation", 0),
+                              "pending": [{"status": "queued", "text": entry["text"]} for entry in queue]}
+        else:
+            queue_snapshot = {"queued": {"user": queue[0]["text"]} if queue else None}
         return {"session_id": sid, "resumed": stored, "message_count": len(session["messages"]),
-                **({"execution_generation": runtime.get("execution_generation", 0)} if CONFIG.get("session_authority") else {}),
+                **queue_snapshot,
                 "messages": [] if omit else session["messages"], "messages_omitted": omit,
                 "info": {"model": PROFILES[profile]["model"], "running": runtime["running"]},
                 **live_turn(runtime), "running": runtime["running"], "session_key": stored,
                 "started_at": session["started_at"], "status": "streaming" if runtime["running"] else "idle",
-                "open_requests": open_requests(sid),
-                "queued": {"user": runtime["queue"][0]["text"]} if runtime.get("queue") else None}
+                "open_requests": open_requests(sid)}
 
 
 def retire_undrained_queue_rows(rows):

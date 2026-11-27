@@ -150,6 +150,9 @@ struct BackendIntegrationTests {
         let second = PromptSubmitContract(sessionID: runtime, text: "queued media",
                                           profile: "writer", images: images)
         _ = try await submit(second, on: socket)
+        let resumed = try await socket.request("session.resume", ["session_id": .string(stored), "profile": .string("writer")])
+        #expect(resumed["queued"] == nil)
+        #expect(GatewayQueue.queuedPrompt(in: resumed) == "queued media")
         let stale = await #expect(throws: GatewayRPCError.self) {
             try await socket.interrupt(sessionID: runtime, profile: "writer", generation: generation - 1)
         }

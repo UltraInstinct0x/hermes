@@ -154,6 +154,17 @@ struct GatewayHeldQueueTests {
         #expect(nothing?.entries.count == nil)
     }
 
+    @Test func authorityResumeKeepsAnAcceptedPhotoOnlyMessage() throws {
+        let message = Message(text: "", photos: ["photo.jpg"])
+        var held = Self.holding([message])
+        let snapshot = try #require(JSONValue.parse(#"{"pending":[{"status":"started","text":"running"},{"status":"queued","text":""}]}"#))
+        let dropped = held.attached(head: GatewayQueue.queuedPrompt(in: snapshot))
+        #expect(dropped == nil)
+        #expect(held.entries.map(\.item) == [message])
+        let idle = try #require(JSONValue.parse(#"{"pending":[{"status":"started","text":"running"}]}"#))
+        #expect(GatewayQueue.queuedPrompt(in: idle) == nil)
+    }
+
     @Test func theBaselineIsTheFirstHeldMessagesAndGoesWithTheTray() {
         var held = GatewayHeldQueue<Message>()
         held.hold("first", item: Message(text: "first"), after: 4)
