@@ -47,7 +47,8 @@ last question.
 
 The iPhone uses the same owning-session attach as [Needs You](inbox.md). It checks the complete
 `srq-…` ID and the displayed request against the owner's live snapshot before sending the answer.
-Nothing is queued on the Watch. **Answer sent** means the iPhone wrote the reply, not that the
-gateway confirmed it won. If someone else answered, the request changed, or it expired, the Watch
+Nothing is queued on the Watch. **Answer sent** shows your answer and its Bot or chat. It means
+the iPhone wrote the reply, not that the gateway confirmed it won. **Back to Requests** returns
+to a refreshed list. If someone else answered, the request changed, or it expired, the Watch
 tells you it is no longer pending. If the phone can't confirm the send, refresh Requests before
 trying again. Existing notifications and their actions are unchanged.

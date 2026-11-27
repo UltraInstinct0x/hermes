@@ -56,6 +56,8 @@ final class WatchLink: NSObject, WCSessionDelegate {
     }
 
     #if DEBUG
+    private var fixtureSettled: Set<WatchCompanion.RequestCard.ID> = []
+
     private var fixtureCards: [WatchCompanion.RequestCard] {
         [
             .init(requestID: "srq-backup", source: "Ops · Backups",
@@ -76,9 +78,10 @@ final class WatchLink: NSObject, WCSessionDelegate {
         case .latestReply(let bot):
             return bot == id ? .latestReply("The **backups** finished.") : .unavailable
         case .openRequests:
-            return .openRequests(fixtureCards, incomplete: false)
+            return .openRequests(fixtureCards.filter { !fixtureSettled.contains($0.id) }, incomplete: false)
         case .answer(let card, let answer):
             guard fixtureCards.contains(card), card.result(for: answer) != nil else { return .answer(.invalidAnswer) }
+            guard fixtureSettled.insert(card.id).inserted else { return .answer(.noLongerPending) }
             return .answer(answer == .approval(.deny) ? .noLongerPending : .sent)
         }
     }
@@ -198,7 +201,7 @@ private struct WatchRequestList: View {
                 }
                 ForEach(cards) { card in
                     NavigationLink {
-                        WatchRequestDetail(card: card, phone: phone)
+                        WatchRequestDetail(card: card, phone: phone) { retry += 1 }
                     } label: {
                         VStack(alignment: .leading) {
                             Text(heading(for: card)).font(.headline).lineLimit(2)
@@ -239,8 +242,11 @@ private struct WatchRequestList: View {
 private struct WatchRequestDetail: View {
     let card: WatchCompanion.RequestCard
     let phone: WatchLink
+    let refreshRequests: () -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var sending = false
     @State private var status: WatchCompanion.AnswerStatus?
+    @State private var submitted: WatchCompanion.RequestAnswer?
     @State private var answers: [String: WatchCompanion.ClarifyAnswer] = [:]
     @State private var step = 0
 
@@ -252,6 +258,15 @@ private struct WatchRequestDetail: View {
                 } else if let status {
                     Text(receipt(status)).font(.headline)
                         .accessibilityIdentifier("watchAnswerStatus")
+                    Text(card.source).font(.footnote).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("watchAnswerSource")
+                    if status == .sent, let submitted {
+                        receiptDetails(submitted)
+                    }
+                    Button("Back to Requests") {
+                        dismiss()
+                        refreshRequests()
+                    }
                 } else {
                     Text(card.source).font(.footnote).foregroundStyle(.secondary)
                     switch card.content {
@@ -289,7 +304,12 @@ private struct WatchRequestDetail: View {
                 let choice = question.choices[index]
                 let chosen = isSelected(choice, for: question)
                 Button { pick(choice, for: question) } label: {
-                    Label(choice, systemImage: chosen ? "checkmark.circle.fill" : "circle")
+                    HStack {
+                        if chosen {
+                            Image(systemName: "checkmark").accessibilityHidden(true)
+                        }
+                        Text(choice)
+                    }
                 }
                 .accessibilityAddTraits(chosen ? .isSelected : [])
             }
@@ -339,11 +359,34 @@ private struct WatchRequestDetail: View {
         sending = true
         Task {
             if case .answer(let result) = await phone.send(.answer(card, answer)) {
+                submitted = answer
                 status = result
             } else {
                 status = .unavailable
             }
             sending = false
+        }
+    }
+
+    @ViewBuilder
+    private func receiptDetails(_ answer: WatchCompanion.RequestAnswer) -> some View {
+        switch answer {
+        case .approval(.once):
+            Text("Allowed once").accessibilityIdentifier("watchSubmittedAnswer")
+        case .approval(.deny):
+            Text("Denied").accessibilityIdentifier("watchSubmittedAnswer")
+        case .clarify:
+            if case .clarify(let questions) = card.content, let result = card.result(for: answer)?["answers"] {
+                ForEach(questions) { question in
+                    if let value = result[question.id] {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(question.prompt).font(.footnote).foregroundStyle(.secondary)
+                            Text(value.stringValue ?? (value.arrayValue ?? []).compactMap(\.stringValue).joined(separator: ", "))
+                                .accessibilityIdentifier("watchSubmittedAnswer")
+                        }
+                    }
+                }
+            }
         }
     }
 

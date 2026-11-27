@@ -36,17 +36,51 @@ final class WatchCompanionUITests: XCTestCase {
 
         clarify.tap()
         let pick = app.buttons["PDF"]
-        XCTAssertTrue(pick.waitForExistence(timeout: 5))
-        pick.tap()
-        capture("watch-clarify-choice", in: app)
+        let markdown = app.buttons["Markdown"]
         let send = app.buttons["Send"]
+        XCTAssertTrue(pick.waitForExistence(timeout: 5))
+        XCTAssertFalse(pick.isSelected)
+        XCTAssertFalse(markdown.isSelected)
+        capture("watch-clarify-unselected", in: app)
+        if !send.isHittable { app.swipeUp() }
+        XCTAssertFalse(send.isEnabled)
+        if !pick.isHittable { app.swipeDown() }
+        pick.tap()
+        XCTAssertTrue(pick.isSelected)
+        XCTAssertFalse(markdown.isSelected)
+        capture("watch-clarify-choice", in: app)
         if !send.isHittable { app.swipeUp() }
         XCTAssertTrue(send.isEnabled)
         send.tap()
         let status = app.staticTexts["watchAnswerStatus"]
         XCTAssertTrue(status.waitForExistence(timeout: 5))
         XCTAssertEqual(status.label, "Answer sent")
+        XCTAssertEqual(app.staticTexts["watchAnswerSource"].label, "Research Buddy")
+        XCTAssertEqual(app.staticTexts["watchSubmittedAnswer"].label, "PDF")
         capture("watch-clarify-answer", in: app)
+        let back = app.buttons["Back to Requests"]
+        if !back.isHittable { app.swipeUp() }
+        back.tap()
+        XCTAssertTrue(approval.waitForExistence(timeout: 5))
+        XCTAssertTrue(clarify.waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testApprovalReceiptShowsDecisionAndOwner() {
+        let app = launchRequests()
+        let approval = app.buttons["watchRequest-srq-backup"]
+        XCTAssertTrue(approval.waitForExistence(timeout: 5))
+        approval.tap()
+
+        let allow = app.buttons["Allow Once"]
+        XCTAssertTrue(allow.waitForExistence(timeout: 5))
+        if !allow.isHittable { app.swipeUp() }
+        allow.tap()
+        let status = app.staticTexts["watchAnswerStatus"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertEqual(status.label, "Answer sent")
+        XCTAssertEqual(app.staticTexts["watchAnswerSource"].label, "Ops · Backups")
+        XCTAssertEqual(app.staticTexts["watchSubmittedAnswer"].label, "Allowed once")
     }
 
     @MainActor
