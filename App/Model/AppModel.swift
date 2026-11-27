@@ -449,6 +449,10 @@ final class AppModel {
         let certificate = bots.first { $0.id == botID }?.access?.clientCertificate?.fingerprint
         updated.removeAll { $0.id == botID }
         try store.save(updated)
+        needsYou.forgetGateway(botID)
+        #if os(iOS)
+        watchRelay.forgetGateway(botID)
+        #endif
         try? store.removeAPIKey(for: botID)
         try? store.setBackendCredential(nil, for: botID)
         GatewayAccessRegistry.shared.forget(botID)

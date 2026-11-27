@@ -29,7 +29,7 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
     public let settledAt: TimeInterval?
     public let answeredBy: LedgerAnswerer?
 
-    public struct ID: Sendable, Hashable {
+    public struct ID: Codable, Sendable, Hashable {
         let canonical: Bool
         let gateway: String?
         let profile: String
@@ -42,11 +42,16 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
     }
 
     public func approval(in snapshot: JSONValue) -> ApprovalRequest? {
-        guard kind == "approval", requestID.hasPrefix("srq-"), requestID.count > 4 else { return nil }
+        guard kind == "approval", let request = openRequest(in: snapshot) else { return nil }
+        return GatewayTurnDecoder.approval(from: request)
+    }
+
+    public func openRequest(in snapshot: JSONValue) -> GatewayServerRequest? {
+        guard requestID.hasPrefix("srq-"), requestID.count > 4 else { return nil }
         for frame in snapshot["open_requests"]?.arrayValue ?? [] {
-            guard frame["method"]?.stringValue == "approval", frame["id"]?.stringValue == requestID,
+            guard frame["method"]?.stringValue == kind, frame["id"]?.stringValue == requestID,
                   let params = frame["params"] else { continue }
-            return GatewayTurnDecoder.approval(from: .init(id: requestID, method: "approval", params: params))
+            return .init(id: requestID, method: kind, params: params)
         }
         return nil
     }
@@ -57,6 +62,30 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
         case createdAt = "created_at", expiresAt = "expires_at", answeredAt = "answered_at", answeredBy = "answered_by"
         case settledAt = "settled_at"
         case profile, kind, state, prompt, choices, outcome
+    }
+}
+
+public struct LedgerRouteCache<Route> {
+    private var entries: [LedgerRow.ID: (gateway: UUID, route: Route)] = [:]
+    private var removedGateways: Set<UUID> = []
+
+    public init() {}
+
+    public subscript(id: LedgerRow.ID) -> Route? { entries[id]?.route }
+
+    public func gateway(for id: LedgerRow.ID) -> UUID? { entries[id]?.gateway }
+
+    public mutating func set(_ route: Route, for id: LedgerRow.ID, gateway: UUID) {
+        entries[id] = (gateway, route)
+    }
+
+    public mutating func replace(with refreshed: Self) {
+        entries = refreshed.entries.filter { !removedGateways.contains($0.value.gateway) }
+    }
+
+    public mutating func remove(gateway: UUID) {
+        removedGateways.insert(gateway)
+        entries = entries.filter { $0.value.gateway != gateway }
     }
 }
 

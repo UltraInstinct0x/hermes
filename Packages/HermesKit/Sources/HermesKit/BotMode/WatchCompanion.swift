@@ -1,10 +1,13 @@
 import Foundation
 import HermesMarkdown
+import HermesPush
 
 public enum WatchCompanion {
     public enum Request: Codable, Sendable, Equatable {
         case roster
         case latestReply(BotID)
+        case openRequests
+        case answer(RequestCard, RequestAnswer)
     }
 
     public enum Response: Codable, Sendable, Equatable {
@@ -12,6 +15,141 @@ public enum WatchCompanion {
         case latestReply(String?)
         case unavailable
         case botNotFound
+        case openRequests([RequestCard], incomplete: Bool)
+        case answer(AnswerStatus)
+    }
+
+    public enum AnswerStatus: String, Codable, Sendable, Equatable {
+        case sent, noLongerPending, invalidAnswer, unavailable
+    }
+
+    public enum RequestAnswer: Codable, Sendable, Equatable {
+        case approval(Decision)
+        case clarify([String: ClarifyAnswer])
+    }
+
+    public enum Decision: String, Codable, Sendable, Equatable {
+        case once, deny
+    }
+
+    public enum ClarifyAnswer: Codable, Sendable, Equatable {
+        case text(String)
+        case choices([String])
+    }
+
+    public struct RequestCard: Identifiable, Codable, Sendable, Equatable {
+        public struct ID: Hashable, Codable, Sendable {
+            public let row: LedgerRow.ID?
+            public let requestID: String
+            public let gateway: UUID?
+            let sessionID: String?
+            let profile: String
+        }
+
+        public struct Question: Identifiable, Codable, Sendable, Equatable {
+            public let id: String
+            public let prompt: String
+            public let choices: [String]
+            public let multiSelect: Bool
+
+            public init(id: String, prompt: String, choices: [String], multiSelect: Bool = false) {
+                self.id = id
+                self.prompt = prompt
+                self.choices = choices
+                self.multiSelect = multiSelect
+            }
+        }
+
+        public enum Content: Codable, Sendable, Equatable {
+            case approval(command: String, decisions: [Decision])
+            case clarify([Question])
+            case openOnPhone(isApproval: Bool)
+        }
+
+        public let id: ID
+        public let source: String
+        public let content: Content
+        public let expiresAt: TimeInterval?
+
+        public init(requestID: String, source: String, content: Content, expiresAt: TimeInterval? = nil) {
+            id = ID(row: nil, requestID: requestID, gateway: nil, sessionID: nil, profile: "")
+            self.source = source
+            self.content = content
+            self.expiresAt = expiresAt
+        }
+
+        public init?(row: LedgerRow, snapshot: JSONValue, gateway: UUID? = nil, source: String, now: Date = .now) {
+            guard row.state == "open", let sessionID = row.sessionID, !sessionID.isEmpty,
+                  let request = row.openRequest(in: snapshot) else { return nil }
+            id = Self.identity(of: row, gateway: gateway)
+            self.source = source
+            expiresAt = request.params["expires_at"]?.doubleValue ?? row.expiresAt
+            if Self.isExpired(at: now, expiresAt: expiresAt) { return nil }
+
+            switch request.method {
+            case "approval":
+                guard let approval = GatewayTurnDecoder.approval(from: request) else { return nil }
+                if approval.smartDenied || approval.isMemorySave || approval.isPaymentFill {
+                    content = .openOnPhone(isApproval: true)
+                } else {
+                    var decisions: [Decision] = []
+                    if let command = approval.command, !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       approval.choices.contains(.once) {
+                        decisions.append(.once)
+                    }
+                    if approval.choices.contains(.deny) { decisions.append(.deny) }
+                    content = .approval(command: approval.command ?? approval.summary, decisions: decisions)
+                }
+            case "clarify":
+                guard let clarify = HermesRequest.parse(request), case .clarify(let questions) = clarify.kind,
+                      Set(questions.map(\.id)).count == questions.count else { return nil }
+                let pending = questions.filter { request.params["answers"]?[$0.id] == nil }
+                guard !pending.isEmpty else { return nil }
+                content = .clarify(pending.map {
+                    Question(id: $0.id, prompt: VisibleText.of($0.question), choices: $0.choices, multiSelect: $0.multiSelect)
+                })
+            default:
+                return nil
+            }
+        }
+
+        public static func identity(of row: LedgerRow, gateway: UUID? = nil) -> ID {
+            ID(row: row.id, requestID: row.requestID, gateway: gateway, sessionID: row.sessionID, profile: row.profileID ?? row.profile)
+        }
+
+        public func isExpired(at now: Date = .now) -> Bool {
+            Self.isExpired(at: now, expiresAt: expiresAt)
+        }
+
+        private static func isExpired(at now: Date, expiresAt: TimeInterval?) -> Bool {
+            expiresAt.map { $0 <= now.timeIntervalSince1970 } ?? false
+        }
+
+        public func result(for answer: RequestAnswer) -> JSONValue? {
+            switch (content, answer) {
+            case (.approval(_, let decisions), .approval(let choice)) where decisions.contains(choice):
+                return .object(["choice": .string(choice.rawValue)])
+            case (.clarify(let questions), .clarify(let answers)) where questions.count == answers.count:
+                var values: [String: JSONValue] = [:]
+                for question in questions {
+                    switch answers[question.id] {
+                    case .text(let text) where !question.multiSelect:
+                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return nil }
+                        values[question.id] = .string(question.choices.contains(text) ? text : trimmed)
+                    case .choices(let choices) where question.multiSelect:
+                        let selected = Set(choices)
+                        guard !selected.isEmpty, selected.isSubset(of: question.choices) else { return nil }
+                        values[question.id] = .array(question.choices.filter(selected.contains).map(JSONValue.string))
+                    default:
+                        return nil
+                    }
+                }
+                return .object(["answers": .object(values)])
+            default:
+                return nil
+            }
+        }
     }
 
     public struct BotID: Hashable, Codable, Sendable {

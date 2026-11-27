@@ -55,7 +55,7 @@ final class NeedsYouFeed {
         case end
     }
 
-    @ObservationIgnored private var routes: [LedgerRow.ID: Route] = [:]
+    @ObservationIgnored private var routes = LedgerRouteCache<Route>()
     @ObservationIgnored private var failedLookups: Set<LedgerRow.ID> = []
     @ObservationIgnored private var cursors: [UUID: Cursor] = [:]
     @ObservationIgnored private var boxWorkspaces: Set<UUID> = []
@@ -69,7 +69,7 @@ final class NeedsYouFeed {
         defer { refreshing = false }
         repeat {
             needsRefresh = false
-            var routing: [LedgerRow.ID: Route] = [:]
+            var routing = LedgerRouteCache<Route>()
             var boxes: Set<UUID> = []
             var liveBoxSources: [UUID: Set<LedgerSource.ID>] = [:]
             var snapshots: [LedgerSnapshot] = []
@@ -83,14 +83,14 @@ final class NeedsYouFeed {
                         boxes.insert(workspace.id)
                         liveBoxSources[workspace.id] = Set((box.sources ?? []).filter { $0.state == .live }.map(\.id))
                         for row in box.open {
-                            if let alias = row.gatewayID { routing[row.id] = .box(backend, alias) }
+                            if let alias = row.gatewayID { routing.set(.box(backend, alias), for: row.id, gateway: workspace.id) }
                         }
                         for source in box.sources ?? [] where source.state == .unsupported {
                             guard let profile = source.profileID else { continue }
                             let route = Route.box(backend, source.gatewayID)
                             if let rows = try? await Self.legacyRows(source.id, profile: profile, route: route) {
                                 snapshots.append(.init(open: rows, recent: [], openCount: rows.count, sources: nil))
-                                for row in rows where routing[row.id] == nil { routing[row.id] = route }
+                                for row in rows where routing[row.id] == nil { routing.set(route, for: row.id, gateway: workspace.id) }
                             }
                         }
                         continue
@@ -107,7 +107,7 @@ final class NeedsYouFeed {
                     let source = LedgerSource.ID(gatewayID: workspace.id.uuidString, profileID: profile)
                     do {
                         let rows = try await Self.legacyRows(source, profile: profile, route: route)
-                        for row in rows where routing[row.id] == nil { routing[row.id] = route }
+                        for row in rows where routing[row.id] == nil { routing.set(route, for: row.id, gateway: workspace.id) }
                         open += rows
                         coverage.append(.init(id: source, state: .unsupported))
                     } catch {
@@ -123,7 +123,7 @@ final class NeedsYouFeed {
             for workspace in workspaces where boxes.contains(workspace.id) {
                 workspace.ledgerSources = merged.sources ?? []
             }
-            routes = routing
+            routes.replace(with: routing)
             lookupRetries = lookupRetries.filter { routing[$0.key] != nil }
             for id in failedLookups where routing[id] != nil && requestNames[id] == nil {
                 lookupRetries[id, default: 0] += 1
@@ -136,6 +136,10 @@ final class NeedsYouFeed {
             boxLiveSources = liveBoxSources
             updateMoreHistory(workspaces)
         } while needsRefresh && !Task.isCancelled
+    }
+
+    func forgetGateway(_ id: UUID) {
+        routes.remove(gateway: id)
     }
 
     private static func legacyRows(_ id: LedgerSource.ID, profile: String, route: Route) async throws -> [LedgerRow] {
@@ -188,18 +192,16 @@ final class NeedsYouFeed {
 
     func answer(_ row: LedgerRow, choice: ApprovalChoice, workspaces: [BotWorkspace]) async {
         guard inlineChoices(row).contains(choice), let session = row.sessionID, let route = routes[row.id],
+              let gateway = routes.gateway(for: row.id),
               let shown = requestNames[row.id]?.approval,
               answering.insert(row.id).inserted else { return }
         defer { answering.remove(row.id) }
         do {
-            let sent = try await Self.withSocket(route, receivesServerRequests: true) { socket in
-                let snapshot = try await socket.request("session.resume", Self.resume(session, profile: row.profileID ?? row.profile),
-                                                        timeout: .seconds(10))
-                guard let live = row.approval(in: snapshot), !live.smartDenied, !live.isMemorySave, !live.isPaymentFill,
-                      live.command == shown.command, live.choices.contains(choice) else { return false }
-                guard await socket.respond(to: row.requestID, result: .object(["choice": .string(choice.rawValue)]))
-                else { throw URLError(.networkConnectionLost) }
-                return true
+            let sent = try await Self.answerOnOwner(row, session: session, route: route) { snapshot in
+                guard self.routes.gateway(for: row.id) == gateway,
+                      let live = row.approval(in: snapshot), !live.smartDenied, !live.isMemorySave, !live.isPaymentFill,
+                      live.command == shown.command, live.choices.contains(choice) else { return nil }
+                return .object(["choice": .string(choice.rawValue)])
             }
             receipts[row.id] = sent ? String(localized: "Answer sent from this device") : String(localized: "No longer pending")
             await refresh(workspaces)
@@ -207,6 +209,82 @@ final class NeedsYouFeed {
             receipts[row.id] = String(localized: "Couldn't answer. Check again.")
         }
     }
+
+    private static func answerOnOwner(
+        _ row: LedgerRow, session: String, route: Route, result: @MainActor @Sendable (JSONValue) -> JSONValue?
+    ) async throws -> Bool {
+        try await Self.withSocket(route, receivesServerRequests: true) { socket in
+            let snapshot = try await socket.request("session.resume", Self.resume(session, profile: row.profileID ?? row.profile),
+                                                    timeout: .seconds(10))
+            guard let answer = await result(snapshot) else { return false }
+            guard await socket.respond(to: row.requestID, result: answer) else { throw URLError(.networkConnectionLost) }
+            return true
+        }
+    }
+
+    #if os(iOS)
+    func watchRequests(_ workspaces: [BotWorkspace]) async -> WatchCompanion.Response {
+        await refresh(workspaces)
+        guard let snapshot else { return .unavailable }
+        var cards: [WatchCompanion.RequestCard] = []
+        var incomplete = workspaces.contains { $0.roster == nil } || (snapshot.sources ?? []).contains {
+            $0.state != .live && $0.state != .unsupported
+        }
+        for row in snapshot.open where row.kind == "approval" || row.kind == "clarify" {
+            guard let session = row.sessionID, !session.isEmpty, let route = routes[row.id],
+                  let gateway = routes.gateway(for: row.id) else {
+                incomplete = true
+                continue
+            }
+            let profile = row.profileID ?? row.profile
+            let bot: String
+            switch route {
+            case .direct(let roster):
+                bot = roster.bot(named: profile)?.title ?? profile
+            case .box:
+                bot = profile
+            }
+            do {
+                let card = try await Self.withRoute(route) { request in
+                    let live = try await request("session.resume", Self.resume(session, profile: profile))
+                    let title = live["info"]?["title"]?.stringValue
+                    let source = [bot, title].compactMap { $0 }.filter { !$0.isEmpty }
+                    return WatchCompanion.RequestCard(row: row, snapshot: live, gateway: gateway,
+                                                      source: (source.first == source.last ? Array(source.prefix(1)) : source)
+                                                        .joined(separator: " · "))
+                }
+                if let card { cards.append(card) }
+            } catch {
+                incomplete = true
+            }
+        }
+        return .openRequests(cards.filter { card in
+            guard let id = card.id.row else { return false }
+            return routes.gateway(for: id) == card.id.gateway
+        }, incomplete: incomplete)
+    }
+
+    func answerFromWatch(_ card: WatchCompanion.RequestCard, answer: WatchCompanion.RequestAnswer) async -> WatchCompanion.AnswerStatus {
+        guard !card.isExpired() else { return .noLongerPending }
+        guard card.result(for: answer) != nil else { return .invalidAnswer }
+        guard let id = card.id.row, let gateway = card.id.gateway, routes.gateway(for: id) == gateway,
+              let row = snapshot?.open.first(where: { WatchCompanion.RequestCard.identity(of: $0, gateway: gateway) == card.id }),
+              let session = row.sessionID, let route = routes[id] else { return .noLongerPending }
+        guard answering.insert(row.id).inserted else { return .unavailable }
+        defer { answering.remove(row.id) }
+        do {
+            let sent = try await Self.answerOnOwner(row, session: session, route: route) { snapshot in
+                guard self.routes.gateway(for: id) == gateway,
+                      let live = WatchCompanion.RequestCard(row: row, snapshot: snapshot, gateway: gateway, source: card.source),
+                      live.content == card.content else { return nil }
+                return live.result(for: answer)
+            }
+            return sent ? .sent : .noLongerPending
+        } catch {
+            return routes.gateway(for: id) == gateway ? .unavailable : .noLongerPending
+        }
+    }
+    #endif
 
     static func answeredBy(_ winner: LedgerAnswerer?) -> String {
         let name = winner?.label ?? String(localized: "Unknown device")
