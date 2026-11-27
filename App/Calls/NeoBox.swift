@@ -106,7 +106,10 @@ final class NeoBox {
         restoreIfNeeded()
         pushKit = NeoPushKitHost(coordinator: rings, voip: voip)
         // The box refused the device token: drop it, so the next attempt pairs again on the gateway login.
-        voip.onUnauthorized = { [weak self] in self?.forgetPairing() }
+        voip.onUnauthorized = { [weak self] in
+            guard let self, !isPairing else { return }
+            forgetPairing()
+        }
         let talk = NeoTalkCall(calls: calls, box: self)
         talk.start()
         self.talk = talk
@@ -155,10 +158,14 @@ final class NeoBox {
             }
             return false
         }
+        guard !isPairing else { return false }
         if let box, box.baseURL == login.bff, pairing.gatewayFingerprint() == login.fingerprint { return true }
-        if box != nil { forgetPairing() }
         isPairing = true
         defer { isPairing = false }
+        if box != nil {
+            await push.forget()
+            forgetPairing()
+        }
         do {
             let paired = try await pairing.pairWithGateway(baseURL: login.bff, credentialHeaders: login.headers)
             pairing.rememberGatewayFingerprint(login.fingerprint)

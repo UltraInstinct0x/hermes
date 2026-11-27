@@ -106,6 +106,15 @@ struct PushRegistrarTests {
         #expect(rig.box.unregistrations == [APNsUnregistration(all: true)])
     }
 
+    @Test func forgettingTheOldPairingUnregistersEvenWhenStatusWasUnavailable() async {
+        let rig = Rig(status: nil)
+        await rig.registrar.start(preferences: .suggested)
+        await rig.registrar.forget()
+
+        #expect(rig.box.unregistrations == [APNsUnregistration(all: true)])
+        #expect(!rig.registrar.pushTokensEnabled && rig.registrar.serverEnabled == nil)
+    }
+
     @Test func aBoxWithPushOffKeepsEverythingLocal() async {
         let rig = Rig(status: nil)
         await rig.registrar.start(preferences: .suggested)

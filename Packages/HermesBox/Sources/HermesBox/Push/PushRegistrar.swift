@@ -161,7 +161,11 @@ public final class PushRegistrar {
 
     /// Unpairing: tell the box this phone wants nothing more, then forget it.
     public func forget() async {
-        if serverEnabled == true { await unregisterAll() }
+        let before = pushTokensEnabled
+        let shouldUnregister = preferences.wantsPush || state.pendingOptOut
+        preferences = .allOff
+        notifyGate(before)
+        if shouldUnregister { await unregisterAll() }
         attach(nil)
     }
 
