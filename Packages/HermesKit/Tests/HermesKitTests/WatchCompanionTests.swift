@@ -2,6 +2,57 @@ import Foundation
 import HermesKit
 import Testing
 
+@MainActor @Test func watchCanReadFirstPublishedRequestsWhileQueuedRefreshIsStillRunning() async {
+    let refresh = LedgerRefresh()
+    let first = AsyncStream<Void>.makeStream()
+    let publish = AsyncStream<Void>.makeStream()
+    let second = AsyncStream<Void>.makeStream()
+    let finish = AsyncStream<Void>.makeStream()
+    var requestID: String?
+    var scans = 0
+    let watch = Task {
+        await refresh.waitForSnapshot(hasSnapshot: false) {
+            scans += 1
+            if scans == 1 {
+                first.continuation.finish()
+                var gate = publish.stream.makeAsyncIterator()
+                _ = await gate.next()
+                requestID = "srq-first"
+            } else {
+                second.continuation.finish()
+                var gate = finish.stream.makeAsyncIterator()
+                _ = await gate.next()
+                requestID = "srq-second"
+            }
+            return true
+        }
+        return requestID
+    }
+
+    var started = first.stream.makeAsyncIterator()
+    _ = await started.next()
+    await refresh.refresh {
+        Issue.record("The overlapping refresh should queue a pass, not start another scan")
+        return true
+    }
+    publish.continuation.finish()
+    var queued = second.stream.makeAsyncIterator()
+    _ = await queued.next()
+
+    let timeout = Task {
+        do { try await Task.sleep(for: .seconds(3)) } catch { return }
+        finish.continuation.finish()
+    }
+    #expect(await watch.value == "srq-first")
+    await refresh.waitForSnapshot(hasSnapshot: requestID != nil) {
+        Issue.record("The Watch should reuse a completed snapshot during the queued pass")
+        return true
+    }
+    #expect(requestID == "srq-first")
+    timeout.cancel()
+    finish.continuation.finish()
+}
+
 @Test func legacyRequestScanKeepsApprovalsWhenOtherSessionsCannotBeRead() async throws {
     let source = LedgerSource.ID(gatewayID: "box", profileID: "writer")
     let scan = try await RequestLedgerClient.scanLegacyRequests(source: source) { method, params in

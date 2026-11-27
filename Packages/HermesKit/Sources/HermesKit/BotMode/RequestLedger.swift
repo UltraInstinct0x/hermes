@@ -89,6 +89,59 @@ public struct LedgerRouteCache<Route> {
     }
 }
 
+@MainActor
+public final class LedgerRefresh {
+    private var refreshing = false
+    private var needsRefresh = false
+    private var waiters: [CheckedContinuation<Bool, Never>] = []
+
+    public init() {}
+
+    public func refresh(_ scan: @MainActor () async -> Bool) async {
+        guard !Task.isCancelled else { return }
+        guard !refreshing else { needsRefresh = true; return }
+        refreshing = true
+        await run(scan)
+    }
+
+    public func waitForSnapshot(hasSnapshot: Bool, scan: @escaping @MainActor () async -> Bool) async {
+        while !Task.isCancelled {
+            if refreshing && hasSnapshot { return }
+            let task: Task<Void, Never>?
+            if refreshing {
+                task = nil
+            } else {
+                refreshing = true
+                task = Task { await run(scan) }
+            }
+            let published = await withTaskCancellationHandler {
+                await withCheckedContinuation { waiters.append($0) }
+            } onCancel: {
+                task?.cancel()
+            }
+            if published { return }
+        }
+    }
+
+    private func run(_ scan: @MainActor () async -> Bool) async {
+        defer {
+            refreshing = false
+            resumeWaiters(published: false)
+        }
+        repeat {
+            needsRefresh = false
+            guard !Task.isCancelled, await scan() else { return }
+            resumeWaiters(published: true)
+        } while needsRefresh
+    }
+
+    private func resumeWaiters(published: Bool) {
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending { waiter.resume(returning: published) }
+    }
+}
+
 public struct LedgerSource: Decodable, Sendable, Equatable, Identifiable {
     public enum State: String, Decodable, Sendable {
         case live, unsupported, offline, notAuthorized = "not_authorized", error
