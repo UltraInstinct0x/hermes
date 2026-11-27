@@ -40,17 +40,17 @@ private struct NeoCallCover: ViewModifier {
         let calls = self.calls
         let center = TalkCenter.shared
         content
-            // A minimised call shows on every screen: upstream's own pill, at the top as a chat shows it, from here
-            // whenever no chat is showing its own.
+            // The box call minimised shows on every screen (home, chats, other sections): upstream's own pill, at the
+            // top with the padding a chat gives it, from here only (a chat draws its own pill for Talk calls alone).
             .safeAreaInset(edge: .top, spacing: 0) {
-                if let call = center.display, !center.isExpanded, center.chatPills == 0 {
+                if let call = center.external, !center.isExpanded {
                     CallPill(session: call)
                         .padding(.horizontal, 10)
                         .padding(.bottom, 6)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .animation(.snappy(duration: 0.25), value: center.display == nil || center.isExpanded || center.chatPills > 0)
+            .animation(.snappy(duration: 0.25), value: center.external == nil || center.isExpanded)
             .fullScreenCover(isPresented: Binding(
                 // While it is the app's Talk call, Talk's expanded flag decides (the pill opens it, minimise hides it).
                 get: { TalkCenter.shared.external != nil ? TalkCenter.shared.isExpanded && calls.hasScreen : calls.isScreenShown },

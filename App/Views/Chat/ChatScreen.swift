@@ -244,10 +244,8 @@ struct ChatScreen: View {
         }
         // The call minimised (`talkMinimised`): its pill at the top of the chat.
         .safeAreaInset(edge: .top, spacing: 0) {
-            if let call = TalkCenter.shared.display, !TalkCenter.shared.isExpanded {
+            if let call = TalkCenter.shared.session, !TalkCenter.shared.isExpanded {
                 CallPill(session: call)
-                    .onAppear { TalkCenter.shared.chatPills += 1 }
-                    .onDisappear { TalkCenter.shared.chatPills -= 1 }
                     .padding(.horizontal, 10)
                     .padding(.bottom, 6)
                     .transition(.move(edge: .top).combined(with: .opacity))
