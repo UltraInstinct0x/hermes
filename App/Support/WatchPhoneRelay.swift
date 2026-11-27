@@ -5,6 +5,7 @@ import WatchConnectivity
 
 final class WatchPhoneRelay: NSObject, WCSessionDelegate {
     private weak var model: AppModel?
+    private let requests = NeedsYouFeed()
 
     func start(model: AppModel) {
         guard WCSession.isSupported() else { return }
@@ -40,6 +41,10 @@ final class WatchPhoneRelay: NSObject, WCSessionDelegate {
     private func respond(to request: WatchCompanion.Request) async -> WatchCompanion.Response {
         guard let model else { return .unavailable }
         switch request {
+        case .openRequests:
+            return await requests.watchRequests(model.bots.compactMap { model.workspaces[$0.id] })
+        case .answer(let card, let answer):
+            return .answer(await requests.answerFromWatch(card, answer: answer))
         case .roster:
             var bots: [WatchCompanion.Bot] = []
             var hasUnavailableGateway = false

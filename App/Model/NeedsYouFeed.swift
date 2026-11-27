@@ -192,14 +192,10 @@ final class NeedsYouFeed {
               answering.insert(row.id).inserted else { return }
         defer { answering.remove(row.id) }
         do {
-            let sent = try await Self.withSocket(route, receivesServerRequests: true) { socket in
-                let snapshot = try await socket.request("session.resume", Self.resume(session, profile: row.profileID ?? row.profile),
-                                                        timeout: .seconds(10))
+            let sent = try await Self.answerOnOwner(row, session: session, route: route) { snapshot in
                 guard let live = row.approval(in: snapshot), !live.smartDenied, !live.isMemorySave, !live.isPaymentFill,
-                      live.command == shown.command, live.choices.contains(choice) else { return false }
-                guard await socket.respond(to: row.requestID, result: .object(["choice": .string(choice.rawValue)]))
-                else { throw URLError(.networkConnectionLost) }
-                return true
+                      live.command == shown.command, live.choices.contains(choice) else { return nil }
+                return .object(["choice": .string(choice.rawValue)])
             }
             receipts[row.id] = sent ? String(localized: "Answer sent from this device") : String(localized: "No longer pending")
             await refresh(workspaces)
@@ -207,6 +203,76 @@ final class NeedsYouFeed {
             receipts[row.id] = String(localized: "Couldn't answer. Check again.")
         }
     }
+
+    private static func answerOnOwner(
+        _ row: LedgerRow, session: String, route: Route, result: @Sendable (JSONValue) -> JSONValue?
+    ) async throws -> Bool {
+        try await Self.withSocket(route, receivesServerRequests: true) { socket in
+            let snapshot = try await socket.request("session.resume", Self.resume(session, profile: row.profileID ?? row.profile),
+                                                    timeout: .seconds(10))
+            guard let answer = result(snapshot) else { return false }
+            guard await socket.respond(to: row.requestID, result: answer) else { throw URLError(.networkConnectionLost) }
+            return true
+        }
+    }
+
+    #if os(iOS)
+    func watchRequests(_ workspaces: [BotWorkspace]) async -> WatchCompanion.Response {
+        await refresh(workspaces)
+        guard let snapshot else { return .unavailable }
+        var cards: [WatchCompanion.RequestCard] = []
+        var incomplete = workspaces.contains { $0.roster == nil } || (snapshot.sources ?? []).contains {
+            $0.state != .live && $0.state != .unsupported
+        }
+        for row in snapshot.open where row.kind == "approval" || row.kind == "clarify" {
+            guard let session = row.sessionID, !session.isEmpty, let route = routes[row.id] else {
+                incomplete = true
+                continue
+            }
+            let profile = row.profileID ?? row.profile
+            let bot: String
+            switch route {
+            case .direct(let roster):
+                bot = roster.bot(named: profile)?.title ?? profile
+            case .box:
+                bot = profile
+            }
+            do {
+                let card = try await Self.withRoute(route) { request in
+                    let live = try await request("session.resume", Self.resume(session, profile: profile))
+                    let title = live["info"]?["title"]?.stringValue
+                    let source = [bot, title].compactMap { $0 }.filter { !$0.isEmpty }
+                    return WatchCompanion.RequestCard(row: row, snapshot: live,
+                                                      source: (source.first == source.last ? Array(source.prefix(1)) : source)
+                                                        .joined(separator: " · "))
+                }
+                if let card { cards.append(card) }
+            } catch {
+                incomplete = true
+            }
+        }
+        return .openRequests(cards, incomplete: incomplete)
+    }
+
+    func answerFromWatch(_ card: WatchCompanion.RequestCard, answer: WatchCompanion.RequestAnswer) async -> WatchCompanion.AnswerStatus {
+        guard !card.isExpired() else { return .noLongerPending }
+        guard card.result(for: answer) != nil else { return .invalidAnswer }
+        guard let row = snapshot?.open.first(where: { WatchCompanion.RequestCard.identity(of: $0) == card.id }),
+              let session = row.sessionID, let route = routes[row.id] else { return .noLongerPending }
+        guard answering.insert(row.id).inserted else { return .unavailable }
+        defer { answering.remove(row.id) }
+        do {
+            let sent = try await Self.answerOnOwner(row, session: session, route: route) { snapshot in
+                guard let live = WatchCompanion.RequestCard(row: row, snapshot: snapshot, source: card.source),
+                      live.content == card.content else { return nil }
+                return live.result(for: answer)
+            }
+            return sent ? .sent : .noLongerPending
+        } catch {
+            return .unavailable
+        }
+    }
+    #endif
 
     static func answeredBy(_ winner: LedgerAnswerer?) -> String {
         let name = winner?.label ?? String(localized: "Unknown device")

@@ -39,7 +39,7 @@ final class WatchLink: NSObject, WCSessionDelegate {
         reachable = WCSession.default.activationState == .activated && WCSession.default.isReachable
     }
 
-    func read(_ request: WatchCompanion.Request) async -> WatchCompanion.Response? {
+    func send(_ request: WatchCompanion.Request) async -> WatchCompanion.Response? {
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "HERMES_WATCH_FIXTURE") {
             return fixture(request)
@@ -56,6 +56,15 @@ final class WatchLink: NSObject, WCSessionDelegate {
     }
 
     #if DEBUG
+    private var fixtureCards: [WatchCompanion.RequestCard] {
+        [
+            .init(requestID: "srq-backup", source: "Ops · Backups",
+                  content: .approval(command: "tar -czf backup.tar.gz reports/", decisions: [.once, .deny])),
+            .init(requestID: "srq-report", source: "Research Buddy",
+                  content: .clarify([.init(id: "format", prompt: "Which format for the report?", choices: ["PDF", "Markdown"])]))
+        ]
+    }
+
     private func fixture(_ request: WatchCompanion.Request) -> WatchCompanion.Response {
         let id = WatchCompanion.BotID(gateway: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)), profile: "default")
         switch request {
@@ -66,6 +75,11 @@ final class WatchLink: NSObject, WCSessionDelegate {
             ], hasUnavailableGateway: true)
         case .latestReply(let bot):
             return bot == id ? .latestReply("The **backups** finished.") : .unavailable
+        case .openRequests:
+            return .openRequests(fixtureCards, incomplete: false)
+        case .answer(let card, let answer):
+            guard fixtureCards.contains(card), card.result(for: answer) != nil else { return .answer(.invalidAnswer) }
+            return .answer(answer == .approval(.deny) ? .noLongerPending : .sent)
         }
     }
     #endif
@@ -80,6 +94,7 @@ private struct WatchBotList: View {
     var body: some View {
         NavigationStack {
             List {
+                NavigationLink("Requests") { WatchRequestList(phone: phone) }
                 if case .roster(let bots, let hasUnavailableGateway) = response {
                     if hasUnavailableGateway {
                         Text("Some gateways aren’t available.").foregroundStyle(.secondary)
@@ -112,7 +127,7 @@ private struct WatchBotList: View {
         }
         .task(id: ReadTrigger(reachable: phone.reachable, active: phase == .active, retry: retry)) {
             guard phase == .active else { return }
-            let result = await phone.read(.roster)
+            let result = await phone.send(.roster)
             if !Task.isCancelled { response = result }
         }
     }
@@ -148,7 +163,7 @@ private struct WatchBotDetail: View {
                     Button("Refresh") { retry += 1 }
                 case .botNotFound:
                     Text("This Bot is no longer available.")
-                case .unavailable, .roster:
+                case .unavailable, .roster, .openRequests, .answer:
                     Text("The reply isn’t available. Check Hermes on your iPhone.")
                     Button("Retry") { retry += 1 }
                 case nil:
@@ -160,8 +175,184 @@ private struct WatchBotDetail: View {
         .navigationTitle(bot.title)
         .task(id: ReadTrigger(reachable: phone.reachable, active: phase == .active, retry: retry)) {
             guard phase == .active else { return }
-            let result = await phone.read(.latestReply(bot.id))
+            let result = await phone.send(.latestReply(bot.id))
             if !Task.isCancelled { response = result ?? .unavailable }
+        }
+    }
+}
+
+private struct WatchRequestList: View {
+    let phone: WatchLink
+    @State private var response: WatchCompanion.Response?
+    @State private var retry = 0
+    @Environment(\.scenePhase) private var phase
+
+    var body: some View {
+        List {
+            switch response {
+            case .openRequests(let cards, let incomplete):
+                if incomplete {
+                    Text("Some requests couldn’t be checked.").foregroundStyle(.secondary)
+                } else if cards.isEmpty {
+                    Text("No open requests.").foregroundStyle(.secondary)
+                }
+                ForEach(cards) { card in
+                    NavigationLink {
+                        WatchRequestDetail(card: card, phone: phone)
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text(heading(for: card)).font(.headline).lineLimit(2)
+                            Text(card.source).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    .accessibilityIdentifier("watchRequest-\(card.id.requestID)")
+                }
+                Button("Refresh") { retry += 1 }
+            case nil:
+                Text("Checking requests…").foregroundStyle(.secondary)
+            default:
+                Text("Open Hermes on your iPhone and try again.").foregroundStyle(.secondary)
+                Button("Retry") { retry += 1 }
+            }
+        }
+        .navigationTitle("Requests")
+        .task(id: ReadTrigger(reachable: phone.reachable, active: phase == .active, retry: retry)) {
+            guard phase == .active else { return }
+            let result = await phone.send(.openRequests)
+            if !Task.isCancelled { response = result ?? .unavailable }
+        }
+    }
+
+    private func heading(for card: WatchCompanion.RequestCard) -> String {
+        switch card.content {
+        case .approval, .openOnPhone(isApproval: true):
+            String(localized: "Approval needed")
+        case .clarify(let questions):
+            questions.first?.prompt ?? String(localized: "Question")
+        case .openOnPhone(isApproval: false):
+            String(localized: "Question")
+        }
+    }
+}
+
+private struct WatchRequestDetail: View {
+    let card: WatchCompanion.RequestCard
+    let phone: WatchLink
+    @State private var sending = false
+    @State private var status: WatchCompanion.AnswerStatus?
+    @State private var answers: [String: WatchCompanion.ClarifyAnswer] = [:]
+    @State private var step = 0
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                if sending {
+                    Text("Sending answer…").font(.headline)
+                } else if let status {
+                    Text(receipt(status)).font(.headline)
+                        .accessibilityIdentifier("watchAnswerStatus")
+                } else {
+                    Text(card.source).font(.footnote).foregroundStyle(.secondary)
+                    switch card.content {
+                    case .approval(let command, let decisions):
+                        Text("Approval needed").font(.headline)
+                        Text(command).font(.footnote.monospaced())
+                            .fixedSize(horizontal: false, vertical: true)
+                        if decisions.contains(.once) {
+                            Button("Allow Once") { send(.approval(.once)) }.buttonStyle(.borderedProminent)
+                        }
+                        if decisions.contains(.deny) {
+                            Button("Deny", role: .destructive) { send(.approval(.deny)) }
+                        }
+                    case .clarify(let questions):
+                        if questions.indices.contains(step) { clarify(questions) }
+                    case .openOnPhone:
+                        Text("Open the request on your iPhone to review and answer it.").font(.footnote)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .navigationTitle("Request")
+    }
+
+    private func clarify(_ questions: [WatchCompanion.RequestCard.Question]) -> some View {
+        let question = questions[step]
+        let last = step == questions.count - 1
+        return VStack(alignment: .leading, spacing: 8) {
+            if questions.count > 1 {
+                Text("Question \(step + 1) of \(questions.count)").font(.footnote).foregroundStyle(.secondary)
+            }
+            Text(question.prompt).font(.headline)
+            ForEach(question.choices.indices, id: \.self) { index in
+                let choice = question.choices[index]
+                let chosen = isSelected(choice, for: question)
+                Button { pick(choice, for: question) } label: {
+                    Label(choice, systemImage: chosen ? "checkmark.circle.fill" : "circle")
+                }
+                .accessibilityAddTraits(chosen ? .isSelected : [])
+            }
+            if !question.multiSelect {
+                TextField(question.choices.isEmpty ? "Your answer" : "Other answer", text: typedAnswer(for: question))
+            }
+            Button(last ? "Send" : "Next") {
+                if last { send(.clarify(answers)) } else { step += 1 }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(answers[question.id] == nil)
+            if step > 0 { Button("Previous question") { step -= 1 } }
+        }
+        .id(question.id)
+    }
+
+    private func typedAnswer(for question: WatchCompanion.RequestCard.Question) -> Binding<String> {
+        Binding {
+            guard case .text(let text) = answers[question.id], !question.choices.contains(text) else { return "" }
+            return text
+        } set: { value in
+            let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            answers[question.id] = text.isEmpty ? nil : .text(value)
+        }
+    }
+
+    private func isSelected(_ choice: String, for question: WatchCompanion.RequestCard.Question) -> Bool {
+        switch answers[question.id] {
+        case .text(let value): value == choice
+        case .choices(let values): values.contains(choice)
+        case nil: false
+        }
+    }
+
+    private func pick(_ choice: String, for question: WatchCompanion.RequestCard.Question) {
+        guard question.multiSelect else {
+            answers[question.id] = .text(choice)
+            return
+        }
+        var selected = question.choices.filter { isSelected($0, for: question) }
+        if selected.contains(choice) { selected.removeAll { $0 == choice } } else { selected.append(choice) }
+        answers[question.id] = selected.isEmpty ? nil : .choices(selected)
+    }
+
+    private func send(_ answer: WatchCompanion.RequestAnswer) {
+        guard !sending, status == nil, card.result(for: answer) != nil else { return }
+        sending = true
+        Task {
+            if case .answer(let result) = await phone.send(.answer(card, answer)) {
+                status = result
+            } else {
+                status = .unavailable
+            }
+            sending = false
+        }
+    }
+
+    private func receipt(_ status: WatchCompanion.AnswerStatus) -> LocalizedStringKey {
+        switch status {
+        case .sent: "Answer sent"
+        case .noLongerPending: "This request changed or is no longer pending."
+        case .invalidAnswer: "This answer couldn’t be sent. Refresh Requests."
+        case .unavailable: "Couldn’t confirm the answer. Refresh Requests."
         }
     }
 }

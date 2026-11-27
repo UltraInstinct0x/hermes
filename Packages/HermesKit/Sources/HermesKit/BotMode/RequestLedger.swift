@@ -29,7 +29,7 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
     public let settledAt: TimeInterval?
     public let answeredBy: LedgerAnswerer?
 
-    public struct ID: Sendable, Hashable {
+    public struct ID: Codable, Sendable, Hashable {
         let canonical: Bool
         let gateway: String?
         let profile: String
@@ -42,11 +42,16 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
     }
 
     public func approval(in snapshot: JSONValue) -> ApprovalRequest? {
-        guard kind == "approval", requestID.hasPrefix("srq-"), requestID.count > 4 else { return nil }
+        guard kind == "approval", let request = openRequest(in: snapshot) else { return nil }
+        return GatewayTurnDecoder.approval(from: request)
+    }
+
+    public func openRequest(in snapshot: JSONValue) -> GatewayServerRequest? {
+        guard requestID.hasPrefix("srq-"), requestID.count > 4 else { return nil }
         for frame in snapshot["open_requests"]?.arrayValue ?? [] {
-            guard frame["method"]?.stringValue == "approval", frame["id"]?.stringValue == requestID,
+            guard frame["method"]?.stringValue == kind, frame["id"]?.stringValue == requestID,
                   let params = frame["params"] else { continue }
-            return GatewayTurnDecoder.approval(from: .init(id: requestID, method: "approval", params: params))
+            return .init(id: requestID, method: kind, params: params)
         }
         return nil
     }

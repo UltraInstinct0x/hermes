@@ -2,6 +2,78 @@ import Foundation
 import HermesKit
 import Testing
 
+@Test func watchRequestUsesTheFullServerIDAndDoesNotAnswerASimilarRequest() throws {
+    let row = try watchRow(kind: "approval", requestID: "srq-backup-24")
+    let decoy = """
+        {"method":"approval","id":"srq-backup-2","params":{"command":"tar -tf backup.tar","choices":["once","deny"]}}
+        """
+    let otherMethod = """
+        {"method":"clarify","id":"srq-backup-24","params":{"questions":[{"question":"Continue?"}]}}
+        """
+    let missing = try #require(JSONValue.parse("""
+        {"open_requests":[\(decoy),\(otherMethod)]}
+        """))
+    #expect(WatchCompanion.RequestCard(row: row, snapshot: missing, source: "Ops") == nil)
+
+    let exact = """
+        {"method":"approval","id":"srq-backup-24","params":{"request_id":"not-the-rpc-id","command":"tar -tf backup.tar","choices":["once","always","deny"]}}
+        """
+    let live = try #require(JSONValue.parse("""
+        {"open_requests":[\(decoy),\(exact)]}
+        """))
+    let card = try #require(WatchCompanion.RequestCard(row: row, snapshot: live, source: "Ops"))
+    #expect(card.id.requestID == "srq-backup-24")
+    #expect(card.content == .approval(command: "tar -tf backup.tar", decisions: [.once, .deny]))
+    #expect(card.result(for: .approval(.once)) == .object(["choice": .string("once")]))
+    let answer = WatchCompanion.Request.answer(card, .approval(.deny))
+    #expect(try JSONDecoder().decode(WatchCompanion.Request.self, from: JSONEncoder().encode(answer)) == answer)
+    let sameIDElsewhere = try watchRow(kind: "approval", requestID: "srq-backup-24", session: "another-chat")
+    #expect(card.id != WatchCompanion.RequestCard.identity(of: sameIDElsewhere))
+}
+
+@Test func watchRequestsKeepFlaggedApprovalsOnThePhoneAndRejectExpiredCards() throws {
+    let row = try watchRow(kind: "approval", requestID: "srq-flagged")
+    let snapshot = try #require(JSONValue.parse("""
+        {"open_requests":[{"method":"approval","id":"srq-flagged","params":{
+          "command":"inspect report","smart_denied":true,"expires_at":100
+        }}]}
+        """))
+    let open = try #require(WatchCompanion.RequestCard(row: row, snapshot: snapshot, source: "Ops",
+                                                      now: Date(timeIntervalSince1970: 90)))
+    #expect(open.content == .openOnPhone(isApproval: true))
+    #expect(open.result(for: .approval(.deny)) == nil)
+    #expect(open.isExpired(at: Date(timeIntervalSince1970: 100)))
+    #expect(WatchCompanion.RequestCard(row: row, snapshot: snapshot, source: "Ops",
+                                       now: Date(timeIntervalSince1970: 100)) == nil)
+}
+
+@Test func watchClarifyUsesQuestionIDsAndDoesNotOverwriteLockedAnswers() throws {
+    let row = try watchRow(kind: "clarify", requestID: "srq-clarify")
+    let snapshot = try #require(JSONValue.parse("""
+        {"open_requests":[{"method":"clarify","id":"srq-clarify","params":{
+          "questions":[{"qid":"locked","question":"Choose location","choices":["Home","Work"]},
+                       {"qid":"words","question":"What's the title?","choices":["Draft"]},
+                       {"qid":"format","question":"Pick formats","choices":["PDF","Markdown"],"multi_select":true}],
+          "answers":{"locked":"Work"}
+        }}]}
+        """))
+    let card = try #require(WatchCompanion.RequestCard(row: row, snapshot: snapshot, source: "Research Buddy"))
+    let selected: [String: WatchCompanion.ClarifyAnswer] = ["words": .text("  Weekly notes\n"), "format": .choices(["Markdown", "PDF"])]
+    #expect(card.result(for: .clarify(selected)) == .object(["answers": .object([
+        "words": .string("Weekly notes"), "format": .array([.string("PDF"), .string("Markdown")])
+    ])]))
+    #expect(card.result(for: .clarify(selected.merging(["locked": .text("Home")]) { first, _ in first })) == nil)
+    #expect(card.result(for: .clarify(["words": .text("Draft"), "format": .text("PDF")])) == nil)
+    #expect(card.result(for: .clarify(["words": .text("Draft"), "format": .choices(["Other"])])) == nil)
+}
+
+private func watchRow(kind: String, requestID: String, session: String = "backups") throws -> LedgerRow {
+    try JSONDecoder().decode(LedgerRow.self, from: Data("""
+        {"ledger_id":"box-ledger-id","request_id":"\(requestID)","gateway_id":"home","profile":"ops",
+         "session_id":"\(session)","kind":"\(kind)","state":"open","created_at":1}
+        """.utf8))
+}
+
 @Test func watchCompanionKeepsIdenticalProfilesOnDifferentGatewaysSeparate() throws {
     let first = WatchCompanion.BotID(gateway: UUID(), profile: "ops")
     let second = WatchCompanion.BotID(gateway: UUID(), profile: "ops")
