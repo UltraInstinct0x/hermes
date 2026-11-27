@@ -57,6 +57,8 @@ final class IndicatorsUITests: XCTestCase {
     func testStopInterruptsAnAuthorityBotsRunningTurn() async throws {
         let app = try await launch(["-HERMES_OPEN", "bot:default", "-HERMES_SEND_HERE", "marathon on these sources",
                                     "-HERMES_SEND_HERE_AFTER", "4"])
+        XCTAssertTrue(element(app, "label BEGINSWITH 'Searching the web'").waitForExistence(timeout: 60),
+                      "the authority Bot did not start a tool")
         let stop = app.buttons["Stop"]
         XCTAssertTrue(stop.waitForExistence(timeout: 60), "the Bot never started")
         stop.tap()
