@@ -125,10 +125,14 @@ final class NeoBox {
 
     // MARK: pairing on the gateway login
 
+    func bindModel(_ app: AppModel) {
+        self.app = app
+    }
+
     /// The app's gateways, once the first window is up. With the switch on, the box pairing is
     /// checked now (no pairing yet, or a different login).
     func attach(_ app: AppModel) {
-        self.app = app
+        bindModel(app)
         if let pendingRequestLink {
             self.pendingRequestLink = nil
             openRequestLink(pendingRequestLink)
