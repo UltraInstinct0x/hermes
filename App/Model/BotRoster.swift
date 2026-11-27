@@ -72,6 +72,7 @@ final class BotRoster {
     /// The gateway has answered a roster read: only now can a Bot missing from the list be called
     /// missing (`docs/connecting-and-voice.md` §8).
     var hasLiveList: Bool { load.hasLiveList }
+    private(set) var installID: String?
     /// Bots with activity the person hasn't seen (keyed by profile name).
     private(set) var unread: Set<String> = [] {
         didSet { if unread != oldValue { workspace?.unread.update() } }
@@ -1668,6 +1669,7 @@ final class BotRoster {
             // it); back quickly, busy may clear. Only an open socket's answer counts.
             if socket != nil { updateBusy { $0.answered(ticket) } }
             guard case .array(let rows)? = result["profiles"] else { return }
+            installID = result["install_id"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
             apply(rows.map(BotProfile.init(json:)).filter { !$0.name.isEmpty })
             LaunchTrace.mark("Bots fetched (\(rows.count))", id: "Bots fetched")
             if rows != cachedRows {

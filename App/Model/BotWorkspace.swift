@@ -849,6 +849,12 @@ final class BotWorkspace: Identifiable {
         }
     }
 
+    func openLedgerChat(_ session: HermesSession, profile: String) {
+        list(session)
+        conversation(forKey: session.stableID).scopeToLedgerProfile(profile)
+        selection = .session(session.stableID)
+    }
+
     /// Puts a chat opened from elsewhere in the list, in its place by time, unless it's there.
     private func list(_ session: HermesSession) {
         guard !allSessions.contains(where: { $0.stableID == session.stableID }) else { return }

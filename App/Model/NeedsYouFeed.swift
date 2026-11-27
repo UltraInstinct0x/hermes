@@ -38,6 +38,7 @@ final class NeedsYouFeed {
     private(set) var requestNames: [LedgerRow.ID: RequestNames] = [:]
 
     struct RequestNames: Sendable {
+        let installID: String?
         let bot: String?
         let chat: String?
         let approval: ApprovalRequest?
@@ -220,21 +221,22 @@ final class NeedsYouFeed {
             workspace.selection = .bot(profile)
         } else {
             workspace.sidebarMode = .chats
-            workspace.selection = .session(workspace.unreadKey(forStoredSession: session))
+            let key = workspace.unreadKey(forStoredSession: session)
+            var chat = workspace.session(forKey: key) ?? HermesSession.opened(id: session)
+            if !chat.hasRealTitle { chat.title = requestNames[row.id]?.chat }
+            workspace.openLedgerChat(chat, profile: profile)
         }
     }
 
     func localWorkspace(for row: LedgerRow, in app: AppModel) -> BotWorkspace? {
-        guard let session = row.sessionID else { return nil }
+        guard row.sessionID != nil else { return nil }
         switch routes[row.id] {
         case .direct(let roster):
             return app.workspaces.values.first { $0.roster === roster }
         case .box:
-            let profile = row.profileID ?? row.profile
+            guard let installID = requestNames[row.id]?.installID else { return nil }
             let matches = app.workspaces.values.filter { workspace in
-                guard let roster = workspace.roster, let bot = roster.bot(named: profile) else { return false }
-                return bot.canonicalSession.map { $0.id == session || $0.resolvedID == session } == true
-                    || workspace.allSessions.contains { $0.id == session || $0.stableID == session }
+                workspace.roster?.installID == installID
             }
             return matches.count == 1 ? matches.first : nil
         case nil:
@@ -247,8 +249,9 @@ final class NeedsYouFeed {
         let profile = row.profileID ?? row.profile
         let names = try? await Self.withRoute(route, readOnly: true) { request in
             let profiles = try? await request("profiles.list", ["include_sessions": .bool(false)])
+            let installID = profiles?["install_id"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
             let bot = profiles?["profiles"]?.arrayValue?.first { $0["name"]?.stringValue == profile }.map(BotProfile.init(json:))
-            guard let id = row.sessionID else { return RequestNames(bot: bot?.title, chat: nil, approval: nil) }
+            guard let id = row.sessionID else { return RequestNames(installID: installID, bot: bot?.title, chat: nil, approval: nil) }
             let list = try? await request("session.list", [
                 "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
             ])
@@ -264,7 +267,7 @@ final class NeedsYouFeed {
             } else {
                 approval = nil
             }
-            return RequestNames(bot: bot?.title, chat: chat?["title"]?.stringValue, approval: approval)
+            return RequestNames(installID: installID, bot: bot?.title, chat: chat?["title"]?.stringValue, approval: approval)
         }
         if let names { requestNames[row.id] = names }
     }
