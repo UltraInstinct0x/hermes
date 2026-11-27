@@ -270,19 +270,18 @@ final class PushCenter {
     /// Turn On Notifications. Time Sensitive comes from the entitlement, not an option here
     /// (`UNAuthorizationOptionTimeSensitive` only ever worked in iOS 15.0).
     func requestAuthorization() async {
+        #if os(iOS)
+        let couldNotify = canNotify
+        #endif
         let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(
             options: [.alert, .sound, .badge, .providesAppNotificationSettings]
         )) ?? false
         await refreshAuthorization()
         #if os(iOS)
         if granted {
-            let wasRequestsOnly = requestsOnlyAuthorization
             requestsOnlyAuthorization = false
             UIApplication.shared.registerForRemoteNotifications()
-            if wasRequestsOnly, deviceToken != nil {
-                registeredAt.removeAll()
-                await tick()
-            }
+            if !couldNotify, canNotify { registeredAt.removeAll() }
         }
         #endif
         prime = nil
@@ -437,7 +436,15 @@ final class PushCenter {
             return
         }
         registering.insert(id)
-        defer { registering.remove(id) }
+        defer {
+            registering.remove(id)
+            #if os(iOS)
+            if rule == .status, shared.gatewayCheck(appID: id, hasToken: deviceToken != nil, canNotify: canNotify) == .register {
+                registeredAt[id] = nil
+                failedChecks[id] = nil
+            }
+            #endif
+        }
         if gatewayStates[id] != .on(relay: nil) { gatewayStates[id] = .checking }
         let client = AppPushClient { method, params in try await roster.request(method, params, timeout: .seconds(20)) }
         do {
