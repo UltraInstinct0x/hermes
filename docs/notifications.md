@@ -465,6 +465,12 @@ Rules:
 
 ## 3. Answering from a notification
 
+With official Hermes Agent, approval and clarification notifications open their chat and
+offer no answer buttons, including on the Lock Screen. The answer actions below require an
+experimental HermesPush build with `HERMES_EXPERIMENTAL_LOCK_SCREEN_ANSWERS` defined and
+gateway support for the exact-ID answer contract. That flag is off by default; legacy alerts
+remain on.
+
 - **Allow Once / Deny** (`UNNotificationAction` with `.authenticationRequired`; Deny also
   `.destructive`). The app wakes in the background, uses the gateway's live backend socket or opens
   a fresh one with the saved sign-in (`PushResponder`), and answers the request the notification
@@ -493,12 +499,10 @@ Rules:
 - **Save / Don't Save** answer a "Save to memory?" request like Allow Once and Deny, offered only
   when the body shows the whole entry (240 characters, 80 on the Mac; `PushNotice.savesInBanner`).
   A longer entry opens the chat's card.
-- **Question choices** answer `clarify` with that choice; **Reply…**
-  (`UNTextInputNotificationAction`) answers it with the typed text. The app finds the exact
-  `ledger_id` in the owning profile's `request.list` to get the question IDs, then calls
-  `request.answer {id, result: {answers}, profile?}`. An older notice must match its request ID
-  exactly in the session's `session.resume` snapshot. If the ID is missing or no longer pending,
-  Hermes opens the chat instead. A question with several parts gets the answer for the first.
+- In an experimental build, **Question choices** or **Reply…** can answer a single-part
+  `clarify`. The app looks up the exact `ledger_id` in the box's read view, then calls the
+  experimental `request.answer {id, result: {answers}, profile?}`. If the answer cannot be
+  routed to the exact request, or the question has several parts, the app opens the chat.
 - **Reply…** on a reply or a message sends a new message: a chat's as a new run on the API server
   (`POST /v1/runs`), a Bot Chat's with `session.resume` in the Bot's profile and `prompt.submit`, a
   room's with `groups.send`. Which of the first two is decided by the chat, as a tap is: a chat

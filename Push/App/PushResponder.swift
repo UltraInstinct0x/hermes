@@ -52,6 +52,10 @@ enum PushResponder {
         #endif
         guard let notice = response.notice else { return }
         let action = response.action
+        if !NotificationCatalog.lockScreenAnswersEnabled && (notice.kind == .approval || notice.kind == .question) {
+            if action != UNNotificationDismissActionIdentifier { center.open(notice) }
+            return
+        }
         switch action {
         case UNNotificationDismissActionIdentifier:
             return
@@ -208,13 +212,18 @@ enum PushResponder {
             throw Failure.expired
         }
         let (workspace, _) = try gateway(for: notice, center: center)
+        let ledger: LedgerSnapshot?
+        if notice.ledgerID != nil {
+            ledger = try await workspace.roster?.backendClient.federatedLedger()
+        } else {
+            ledger = nil
+        }
         try await withLedgerSocket(notice, workspace: workspace) { request in
             let client = RequestLedgerClient(transport: request)
             let profile = notice.profileID ?? notice.profile
             let exact: GatewayServerRequest
             if notice.ledgerID != nil {
-                let ledger = try await client.list(profile: profile ?? "default", gatewayID: notice.gatewayID ?? "")
-                guard let questions = ExactClarifyAnswer.questions(in: ledger, ledgerID: id),
+                guard let ledger, let questions = ExactClarifyAnswer.questions(in: ledger, ledgerID: id),
                       questions.allSatisfy({ $0["qid"]?.stringValue?.isEmpty == false }) else { throw Failure.expired }
                 exact = GatewayServerRequest(id: id, method: "clarify", params: .object(["questions": .array(questions)]))
             } else {

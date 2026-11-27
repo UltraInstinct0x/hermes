@@ -9,6 +9,14 @@ import UserNotifications
 /// category also exists once per gateway "slot" (`APPROVAL.3`) whose placeholder names that
 /// gateway: a locked phone shows "Needs your OK on Home Server" and nothing else.
 public enum NotificationCatalog {
+    public static var lockScreenAnswersEnabled: Bool {
+        #if HERMES_EXPERIMENTAL_LOCK_SCREEN_ANSWERS
+        true
+        #else
+        false
+        #endif
+    }
+
     public enum Category: String, CaseIterable, Sendable {
         case approval = "APPROVAL"
         case question = "QUESTION"
@@ -120,6 +128,7 @@ public enum NotificationCatalog {
     /// The actions for a category. Allow and Deny need Face ID; Always Allow is never one tap from
     /// the Lock Screen (More Options… opens the full card).
     public static func actions(for category: Category, choices: [String] = []) -> [UNNotificationAction] {
+        if !lockScreenAnswersEnabled && [.approval, .memory, .question].contains(category) { return [] }
         switch category {
         case .approval:
             return [
