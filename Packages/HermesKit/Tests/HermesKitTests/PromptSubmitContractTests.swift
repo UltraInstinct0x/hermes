@@ -43,6 +43,12 @@ struct PromptSubmitContractTests {
         }
     }
 
+    @Test func onlyAuthoritySubmitsCarryTheBotsProfile() {
+        let submit = PromptSubmitContract(sessionID: "rt-1", text: "Hi", profile: "writer")
+        #expect(submit.params(sessionAuthority: true)["profile"] == .string("writer"))
+        #expect(submit.params(sessionAuthority: false)["profile"] == nil)
+    }
+
     @Test func eachMessageMintsItsOwnID() {
         let first = PromptSubmitContract(sessionID: "rt-1", text: "Hi")
         let second = PromptSubmitContract(sessionID: "rt-1", text: "Hi")

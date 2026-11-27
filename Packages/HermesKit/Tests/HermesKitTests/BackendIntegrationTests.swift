@@ -99,7 +99,14 @@ struct BackendIntegrationTests {
         let runtime = try #require(resumed["session_id"]?.stringValue)
 
         let messages = await socket.messages()
-        _ = try await submit(PromptSubmitContract(sessionID: runtime, text: "What's new?", queued: false), on: socket)
+        let prompt = PromptSubmitContract(sessionID: runtime, text: "What's new?", queued: false, profile: "writer")
+        if await socket.sessionAuthority {
+            let unscoped = await #expect(throws: GatewayRPCError.self) {
+                try await submit(PromptSubmitContract(sessionID: runtime, text: prompt.text), on: socket)
+            }
+            #expect(unscoped?.refusalReason == "permission_denied")
+        }
+        _ = try await submit(prompt, on: socket)
         var live = LiveTurn(id: "t", sessionID: runtime)
         var settled = false
         for await message in messages {

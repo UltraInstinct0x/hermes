@@ -251,7 +251,7 @@ enum PushResponder {
                     return runtime
                 }
                 // One id for the reply, so a resend after a stale session is the same message.
-                let reply = PromptSubmitContract(sessionID: try await resume(), text: text, queued: false)
+                let reply = PromptSubmitContract(sessionID: try await resume(), text: text, queued: false, profile: profile)
                 return try await PromptSubmitContract.submittingOnce(reply, send: submit, resume: resume)
             })
             return

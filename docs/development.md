@@ -472,7 +472,7 @@ authority does: `gateway.ready` says `session_authority: true`, a `prompt.submit
 `submission_id` answers 4001 `invalid_params` (with `data.reason`), the same id again is the same
 admission and never a second turn, every new message's receipt says `queued` (an idle chat's too;
 a steer says `started`), a closed session answers 4001 `not_found`, a `prompt.submit` from a socket
-that didn't create or resume the chat answers 4001 `permission_denied` (checked in that order, then
+that didn't create or resume the chat under the requested Bot profile answers 4001 `permission_denied` (checked in that order, then
 the keys; `image.attach_bytes` is refused the same way), and `session.title` answers -32601. A
 `command.dispatch` without a session, or with one that is closed or of another profile than the one
 it names, answers 4001 `not_found`, and a command Hermes doesn't have answers 4001
@@ -1261,4 +1261,3 @@ running), Obsidian Memory (off), Langfuse (two keys missing), agent-ledger (pull
 homeassistant update that asks for more access in Hermes's words. `--plugin-catalog none` answers
 404 for the feed; `POST /api/mock/plugin-hub {failing, feed}` makes installs fail or the feed vanish
 while it runs. `-HERMES_APPS_TOOLS plugins` opens the hub, `plugins:suggested` the Mac's pane.
-

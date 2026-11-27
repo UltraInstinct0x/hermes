@@ -3235,11 +3235,10 @@ final class ConversationModel: Identifiable {
                 let runtime = try await ensureRuntime()
                 stagedOn = runtime
                 for (index, image) in item.images.enumerated() {
-                    staged.staged(try await roster.request("image.attach_bytes", [
-                        "session_id": .string(runtime),
+                    staged.staged(try await roster.request("image.attach_bytes", mediaParams(runtime: runtime, [
                         "content_base64": .string(image.jpegData.base64EncodedString()),
                         "filename": .string("image-\(index + 1).jpg"),
-                    ]))
+                    ])))
                 }
                 if !item.images.isEmpty, let key = stableKey {
                     workspace?.imageStore.remember(item.images, conversation: key, text: item.text)
@@ -3253,7 +3252,8 @@ final class ConversationModel: Identifiable {
                 sent = true
                 // Its own id, so Hermes knows it again if it already has it; a stale session is
                 // resumed and the message sent again, once.
-                let submit = PromptSubmitContract(sessionID: runtime, text: prompt, queued: true, submissionID: item.id.uuidString)
+                let submit = PromptSubmitContract(sessionID: runtime, text: prompt, queued: true,
+                                                  submissionID: item.id.uuidString, profile: gatewayProfile)
                 let result = try await PromptSubmitContract.submittingOnce(submit) { submit in
                     try await roster.submitPrompt(submit)
                 } resume: {
@@ -3288,8 +3288,15 @@ final class ConversationModel: Identifiable {
     /// for whichever prompt comes next.
     private func takeBack(_ staged: StagedImages, runtime: String, roster: BotRoster) async {
         for path in staged.paths {
-            _ = try? await roster.request("image.detach", ["session_id": .string(runtime), "path": .string(path)])
+            _ = try? await roster.request("image.detach", mediaParams(runtime: runtime, ["path": .string(path)]))
         }
+    }
+
+    private func mediaParams(runtime: String, _ fields: [String: JSONValue]) -> [String: JSONValue] {
+        var params = fields
+        params["session_id"] = .string(runtime)
+        if let gatewayProfile { params["profile"] = .string(gatewayProfile) }
+        return params
     }
 
     /// A message the gateway holds: shown in the tray until its turn starts. `item` is the whole
@@ -5274,11 +5281,10 @@ extension ConversationModel {
                     do {
                         stagedOn = runtime
                         for (index, image) in images.enumerated() {
-                            staged.staged(try await roster.request("image.attach_bytes", [
-                                "session_id": .string(runtime),
+                            staged.staged(try await roster.request("image.attach_bytes", mediaParams(runtime: runtime, [
                                 "content_base64": .string(image.jpegData.base64EncodedString()),
                                 "filename": .string("image-\(index + 1).jpg"),
-                            ]))
+                            ])))
                         }
                         references = []
                         for file in files {
@@ -5339,7 +5345,8 @@ extension ConversationModel {
                 // seen yet (a process's notice, a held message Hermes sends as a turn ends, another
                 // device's): with `queued` a busy chat queues it, and the answer says so.
                 let submit = PromptSubmitContract(sessionID: runtime, text: prompt, queued: true,
-                                                  extras: turnVoice?.submitParams ?? [:], submissionID: messageID.uuidString)
+                                                  extras: turnVoice?.submitParams ?? [:], submissionID: messageID.uuidString,
+                                                  profile: gatewayProfile)
                 // Patient: on an open socket the answer comes when a frozen backend wakes; a socket that
                 // dies fails it at once. One that goes quiet never answers, so the stored chat is read
                 // meanwhile (`submitWatched`), counted from here.
@@ -5590,11 +5597,10 @@ extension ConversationModel {
         }
         if file.isPDF {
             do {
-                let result = try await roster.request("pdf.attach", [
-                    "session_id": .string(runtime),
+                let result = try await roster.request("pdf.attach", mediaParams(runtime: runtime, [
                     "content_base64": .string(file.data.base64EncodedString()),
                     "filename": .string(file.name),
-                ], timeout: .seconds(120))
+                ]), timeout: .seconds(120))
                 if result["attached"]?.boolValue != false {
                     staged.staged(result) // its pages go as photos
                     return AttachedFiles.pdfNote(name: file.name)
@@ -5608,11 +5614,12 @@ extension ConversationModel {
         }
         let result: JSONValue
         do {
-            result = try await roster.request("file.attach", [
-                "session_id": .string(runtime),
+            result = try await roster.request("file.attach", mediaParams(runtime: runtime, [
                 "data_url": .string(file.dataURL),
                 "name": .string(file.name),
-            ], timeout: .seconds(120))
+            ]), timeout: .seconds(120))
+        } catch where PromptSubmitContract.isStaleSession(error) {
+            throw error
         } catch {
             // Hermes's own words are an exception's text ("[Errno 28] …"): say it plainly, with the
             // file's name (`docs/composer.md` §2). Anything else is the send's to handle.

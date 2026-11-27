@@ -123,7 +123,8 @@ a session it no longer has (`not_found`), the authority refuses a message with 4
 `permission_denied` when this socket hasn't resumed the chat, as after a reconnect: it refuses
 before taking anything, so the app resumes and sends once more there too. Photos uploaded with
 the message (`image.attach_bytes`) are refused the same way and uploaded again after the same
-resume. Send
+resume. Bot chats send the same profile on authority submits and uploads as on resume, including
+queued sends and notification replies. Send
 Again is a new message with a new id. Other sockets get exactly the keys they always got: their
 `prompt.submit` refuses any key it doesn't know with error 4000.
 

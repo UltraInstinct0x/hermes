@@ -2179,7 +2179,7 @@ def install_authority_dispatch():
 def submit_refusal(params):
     """The refusal Hermes gives a `prompt.submit` with keys it doesn't take, or None."""
     if CONFIG.get("session_authority"):
-        problem = set(params) - AUTHORITY_SUBMIT_KEYS
+        problem = set(params) - AUTHORITY_SUBMIT_KEYS - {"profile"}
         request_id = params.get("submission_id") or params.get("input_id")
         if problem or not isinstance(request_id, str) or not request_id:
             return RPCError(4001, "invalid_params", {"reason": "invalid_params"})
@@ -2462,6 +2462,14 @@ def method_prompt_submit(params):
     return admit_prompt(params, submit_prompt)
 
 
+def check_authority_scope(params, runtime):
+    if not CONFIG.get("session_authority"):
+        return
+    if ((params.get("profile") or "default") != runtime["profile"]
+            or getattr(CURRENT, "peer", None) not in runtime["peers"]):
+        raise RPCError(4001, "permission_denied", {"reason": "permission_denied"})
+
+
 def admit_prompt(params, run):
     """The socket's `prompt.submit` contract around `run(sid, runtime, params)`, for every chat kind."""
     authority = CONFIG.get("session_authority")
@@ -2477,9 +2485,7 @@ def admit_prompt(params, run):
             # gateway/session_controls.py@v0.23.4:899: a socket holds only the chats it created or
             # resumed (`subscriptions`), so a reconnected one holds none until it resumes.
             with LOCK:
-                subscribed = getattr(CURRENT, "peer", None) in runtime["peers"]
-            if not subscribed:
-                raise RPCError(4001, "permission_denied", {"reason": "permission_denied"})
+                check_authority_scope(params, runtime)
             refusal = submit_refusal(params)
             if refusal is not None:
                 raise refusal
@@ -2604,9 +2610,7 @@ def method_image_attach_bytes(params):
         # gateway/session_images.py@v0.23.4 `attach_bytes`: like a submit, only on a chat this
         # socket created or resumed.
         with LOCK:
-            subscribed = getattr(CURRENT, "peer", None) in runtime["peers"]
-        if not subscribed:
-            raise RPCError(4001, "permission_denied", {"reason": "permission_denied"})
+            check_authority_scope(params, runtime)
     path = f"/home/user/.hermes/images/upload_{uuid.uuid4().hex[:8]}.png"
     with LOCK:
         runtime.setdefault("attached_images", []).append(path)
