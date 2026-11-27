@@ -253,7 +253,7 @@ final class NeoBox {
 
     func refreshPush() async {
         if lockScreen.approvals { await ensurePaired(quietly: true) }
-        await push.refreshStatus()
+        await push.start(preferences: lockScreen)
     }
 
     func openRequestLink(_ link: ActivityLink, window: UUID? = nil) {

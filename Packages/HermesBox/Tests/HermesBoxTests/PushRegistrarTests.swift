@@ -65,6 +65,18 @@ private struct Rig {
 @MainActor
 @Suite("S22 push registration: only with the owner's yes AND the box's yes")
 struct PushRegistrarTests {
+    @Test func checkingAgainAfterTheBoxEnablesPushRegistersTheRequestsPreference() async {
+        let rig = Rig(status: nil)
+        await rig.registrar.start(preferences: .suggested)
+        #expect(rig.box.registrations.isEmpty)
+
+        rig.box.status = enabledStatus()
+        await rig.registrar.start(preferences: .suggested)
+
+        #expect(rig.platform.registered == 1)
+        #expect(rig.box.registrations.contains { $0.prefs?.approvals == true })
+    }
+
     @Test func nothingIsRegisteredBeforeTheOwnerOptedIn() async {
         let rig = Rig()
         await rig.registrar.start(preferences: .allOff)
