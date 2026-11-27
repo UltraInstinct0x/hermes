@@ -63,8 +63,10 @@ nonisolated final class NeoDemoLink: CallLink, @unchecked Sendable {
     }
 
     func speak() {
-        push(frame(["type": "tts.start", "call_id": demoCallId, "reply_id": 1, "sample_rate": 24000, "text": "hi"]))
+        push(frame(["type": "tts.start", "call_id": demoCallId, "reply_id": 1, "sample_rate": 24000, "text": "SXS 123 is on time, boarding at 18:40 from gate 207."]))
+        push(frame(["type": "tts.start", "call_id": demoCallId, "reply_id": 2, "sample_rate": 24000, "text": "The details are on your screen too."]))
         continuation.yield(.audio(replyId: 1, pcm: Data(repeating: 0, count: 48_000)))
+        continuation.yield(.audio(replyId: 2, pcm: Data(repeating: 0, count: 48_000)))
     }
 
     func end() { push(frame(["type": "call.ended", "call_id": demoCallId, "reason": "ended_by_client"])) }
@@ -91,6 +93,8 @@ final class NeoDemoAudio: CallAudioIO {
     func play(_ chunk: PlaybackChunk) { isPlaying = true }
     /// Part way through the reply, for the captions.
     var playbackProgress: Double? { isPlaying ? 0.8 : nil }
+    /// Reply 1 heard now, reply 2 queued behind it.
+    var replyQueue: [UInt32] { isPlaying ? [1, 2] : [] }
     func stopPlayback() { isPlaying = false }
     func routeChanged() throws {}
 }

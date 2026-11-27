@@ -70,6 +70,8 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
     private var startAttempts = 0
     /// Where the reply now playing started on the player's timeline (its progress for the captions).
     private var replyStart: TimeInterval?
+    /// Each scheduled reply and where its audio starts on the player's timeline, in play order.
+    private var replyStarts: [(id: UInt32, at: TimeInterval)] = []
 
     init(coordinator: AudioCoordinator = .shared) {
         self.coordinator = coordinator
@@ -223,6 +225,14 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
     var isPlaying: Bool { pending > 0 }
 
     var isWaitingForSession: Bool { running && !ready }
+
+    /// The reply heard now (the last one whose audio has started on the player's timeline), then those after it.
+    var replyQueue: [UInt32] {
+        guard pending > 0, let player else { return [] }
+        let now = player.currentTime
+        guard let index = replyStarts.lastIndex(where: { $0.at <= now }) else { return [] }
+        return replyStarts[index...].map(\.id)
+    }
 
     var playbackProgress: Double? {
         guard pending > 0, let player, let replyStart else { return nil }
@@ -404,7 +414,14 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
         else { return }
         for (index, sample) in samples.enumerated() { target[index] = Float(sample) / 32768 }
         buffer.frameLength = AVAudioFrameCount(samples.count)
-        if pending == 0 { replyStart = player.currentTime }
+        if pending == 0 {
+            replyStart = player.currentTime
+            replyStarts = []
+        }
+        // A new reply starts where everything already scheduled ends.
+        if replyStarts.last?.id != chunk.replyId {
+            replyStarts.append((chunk.replyId, player.currentTime + player.queuedDuration))
+        }
         pending += 1
         player.schedule(buffer, completion: Self.playbackCompletion(self, generation: playGeneration))
         startPlaybackMeter()
@@ -434,6 +451,7 @@ final class NeoCallAudio: AudioSessionDriver, CallAudioIO {
         playbackMeter = nil
         playGeneration += 1
         pending = 0
+        replyStarts = []
         player?.stop()
         onPlaybackLevel?(-120)
     }

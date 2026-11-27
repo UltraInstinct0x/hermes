@@ -36,6 +36,13 @@ public final class CallController {
     public private(set) var playbackLevel = 0.0
     /// Hermes Neo: how much of the reply now playing has been heard (read with `playbackLevel`, which redraws it).
     public var playbackProgress: Double? { audio.playbackProgress }
+    /// Hermes Neo: the replies in the player, the one heard now first (followed 30 times a second while audio runs).
+    public private(set) var playingQueue: [UInt32] = []
+    /// Hermes Neo: what the call's caption follows (`CallCaptionTimeline`, the app's Talk rule).
+    public private(set) var captionTimeline = CallCaptionTimeline()
+    /// Hermes Neo: the call's caption as the app's Talk call words it: the person's words until the reply is heard,
+    /// then the sentence being played and the next one queued.
+    public var talkCaption: (settled: String, lighter: String)? { captionTimeline.caption(playing: playingQueue) }
     /// The last few `playbackLevel` values, for the travelling bars.
     public private(set) var playbackTrail = LevelTrail()
     /// Where the sound goes and why (the owner's choice, a connected device, the phone at the ear).
@@ -526,6 +533,7 @@ public final class CallController {
             session?.linkDown()
             stopSpeech()
         case .inbound(let inbound):
+            followCaption(inbound)
             apply(session?.handle(inbound) ?? [])
         case .audio(let replyId, let pcm):
             guard session?.role == .owner, hold == nil else { return }
@@ -701,6 +709,24 @@ public final class CallController {
     /// A buffer the speaker is rendering right now measured `db` dBFS (called from the audio edge, hopped to the main actor).
     func notePlayback(db: Double) { playbackRaw = (LevelMeter.normalised(db: db), ContinuousClock.now) }
 
+    /// What the caption needs from the hub: the person's words and each reply's sentence ahead of its audio.
+    private func followCaption(_ inbound: CallInbound) {
+        switch inbound {
+        case .transcript(let row): captionTimeline.row(row)
+        case .joined(_, _, _, _, let events): events.forEach { captionTimeline.row($0) }
+        case .ttsStart(_, let replyId, _, let text): captionTimeline.replyAnnounced(replyId, text: text)
+        default: break
+        }
+    }
+
+    /// The reply heard now, from the player: a newer one ends the person's words on screen.
+    private func followPlayer() {
+        let queue = audio.isPlaying ? audio.replyQueue : []
+        guard queue != playingQueue else { return }
+        playingQueue = queue
+        if let first = queue.first { captionTimeline.replyPlaying(first) }
+    }
+
     private func startLevelTicker() {
         levelTicker?.cancel()
         levelTicker = Task { [weak self] in
@@ -731,6 +757,7 @@ public final class CallController {
 
     /// One publishing step: smooth the latest readings over `dt` seconds. Only changes that matter are published.
     func levelTick(dt: Double) {
+        followPlayer()
         let now = ContinuousClock.now
         let mic = micRaw.at.duration(to: now) > Self.staleReading || isMuted ? 0 : micRaw.level
         let played = playbackRaw.at.duration(to: now) > Self.staleReading ? 0 : playbackRaw.level

@@ -41,6 +41,8 @@ public protocol CallAudioIO: AnyObject {
     var isWaitingForSession: Bool { get }
     /// Hermes Neo: how much of the reply now playing has been heard, 0...1; nil when nothing plays.
     var playbackProgress: Double? { get }
+    /// Hermes Neo: the replies in the player, in play order: the one heard now first, then those queued after it.
+    var replyQueue: [UInt32] { get }
 }
 
 extension CallAudioIO {
@@ -52,6 +54,7 @@ extension CallAudioIO {
     public var captureReport: [String] { [] }
     public var isWaitingForSession: Bool { false }
     public var playbackProgress: Double? { nil }
+    public var replyQueue: [UInt32] { [] }
 }
 
 public enum MicrophoneAccess: Sendable, Equatable {

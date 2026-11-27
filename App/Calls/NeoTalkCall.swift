@@ -103,18 +103,10 @@ final class NeoTalkCall: TalkDisplay {
 
     var status: String { calls.stateLine }
 
-    /// Talk's caption: your words while you talk; while the bot talks, the sentence it says now, the words already heard
-    /// settled and the rest lighter, following the speaker (`CallCaptionProgress`); after it, its last sentence.
-    var caption: (settled: String, lighter: String)? {
-        guard let captions = calls.session?.captions else { return nil }
-        if let heard = captions.partialPerson, !heard.isEmpty { return (settled: heard, lighter: "") }
-        guard let reply = captions.botLine else { return nil }
-        // Read with the level, which changes as the speaker plays: the caption follows it.
-        _ = calls.playbackLevel
-        let progress = calls.isPlaying ? (calls.playbackProgress ?? 0) : 1
-        let caption = CallCaptionProgress.split(reply, progress: progress)
-        return caption.settled.isEmpty && caption.lighter.isEmpty ? nil : caption
-    }
+    /// The app's Talk rule (`TalkSession.caption`): the person's words as they are heard, kept until the reply is heard;
+    /// then the sentence being played, settled, and the next one queued, lighter. A sentence shows only once its audio
+    /// plays (`CallCaptionTimeline`).
+    var caption: (settled: String, lighter: String)? { calls.talkCaption }
 
     var hint: String? { nil }
     var notice: String? { calls.session?.notice }
@@ -129,7 +121,7 @@ final class NeoTalkCall: TalkDisplay {
     var pendingRequest: HermesRequest? { chat?.shownRequest }
     var chat: ConversationModel? { box?.waitingConversation(botKey: calls.bot?.botKey) }
     var route: AudioRoute { AudioRoute(output: calls.outputState.routeIsFilled ? .speaker : .receiver, name: "") }
-    var heard: String { calls.session?.captions.partialPerson ?? "" }
+    var heard: String { calls.captionTimeline.heard }
 
     var transcriptLines: [TalkLine] {
         (calls.session?.captions.rows ?? []).filter { !$0.text.isEmpty }.map { TalkLine(id: $0.rowId, isUser: $0.speaker == .person, text: $0.text) }
