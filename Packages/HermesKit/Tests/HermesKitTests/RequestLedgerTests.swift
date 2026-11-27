@@ -5,16 +5,16 @@ import Testing
 @Suite struct RequestLedgerTests {
     @Test func approvalReadsSafetyFromTheExactLiveFrame() throws {
         let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
-            {"ledger_id":"target","request_id":"first","profile":"default","kind":"approval","state":"open","created_at":2}
+            {"ledger_id":"target","request_id":"srq-target","profile":"default","kind":"approval","state":"open","created_at":2}
             """)))
         let snapshot = try #require(JSONValue.parse("""
             {"open_requests":[
-              {"id":"first","method":"approval","params":{"ledger_id":"other","command":"echo same"}},
-              {"id":"second","method":"approval","params":{"ledger_id":"target","command":"echo same","smart_denied":true}}
+              {"id":"srq-other","method":"approval","params":{"ledger_id":"target","command":"echo same"}},
+              {"id":"srq-target","method":"approval","params":{"command":"echo same","smart_denied":true}}
             ]}
             """))
         let approval = try #require(row.approval(in: snapshot))
-        #expect(approval.gatewayRequestID == "second")
+        #expect(approval.gatewayRequestID == "srq-target")
         #expect(approval.smartDenied)
         #expect(approval.command == "echo same")
         #expect(row.approval(in: .object([:])) == nil)

@@ -28,21 +28,24 @@ final class RequestCardUITests: XCTestCase {
             XCTAssertFalse(app.staticTexts["Waiting for your approval"].exists)
             let loadEarlier = app.buttons["Load Earlier"]
             XCTAssertTrue(loadEarlier.waitForExistence(timeout: 10))
+            app.swipeUp()
             loadEarlier.tap()
-            XCTAssertTrue(loadEarlier.waitForNonExistence(timeout: 10))
+            let ready = NSPredicate(format: "exists == false OR enabled == true")
+            await fulfillment(of: [XCTNSPredicateExpectation(predicate: ready, object: loadEarlier)], timeout: 10)
             XCTAssertEqual(approvals.count, 2, "History paging must not add open approvals to Earlier")
+            app.swipeDown()
             attachScreenshot("needs-you-before-answering-\(appearance)")
         }
     }
 
     @MainActor
     func testNeedsYouDeniesOnlyTheSelectedUnattachedRequest() async throws {
-        try await answerOnlySelectedApproval(action: "deny", outcome: "deny", screenshot: "needs-you-answer-receipt")
+        try await answerOnlySelectedApproval(action: "deny", screenshot: "needs-you-answer-receipt")
     }
 
     @MainActor
     func testNeedsYouAllowsOnlyTheSelectedUnattachedRequest() async throws {
-        try await answerOnlySelectedApproval(action: "allow", outcome: "once", screenshot: "needs-you-approve-receipt")
+        try await answerOnlySelectedApproval(action: "allow", screenshot: "needs-you-approve-receipt")
     }
 
     @MainActor
@@ -62,7 +65,7 @@ final class RequestCardUITests: XCTestCase {
     }
 
     @MainActor
-    private func answerOnlySelectedApproval(action: String, outcome: String, screenshot: String) async throws {
+    private func answerOnlySelectedApproval(action: String, screenshot: String) async throws {
         let sessions = try await seedNeedsYouApprovals()
         let app = try await showNeedsYou()
         let selected = app.cells.containing(.staticText, identifier: "Release draft").buttons["needsYou.\(action)"]
@@ -81,15 +84,14 @@ final class RequestCardUITests: XCTestCase {
         selected.tap()
         XCTAssertTrue(selected.waitForNonExistence(timeout: 20))
         XCTAssertTrue(other.exists)
-        let receipt = element(app, "label BEGINSWITH 'Answered by Hermes'")
+        let receipt = app.staticTexts["Answer sent from this device"]
         XCTAssertTrue(receipt.waitForExistence(timeout: 10))
         let after = try await federatedLedger()
         XCTAssertTrue(after["open"]?.contains { ($0["ledger_id"] as? String) == otherID } == true)
         XCTAssertFalse(after["open"]?.contains { ($0["ledger_id"] as? String) == selectedID } == true)
         let settled = try XCTUnwrap(after["recent"]?.first { ($0["ledger_id"] as? String) == selectedID })
-        XCTAssertEqual(settled["outcome"] as? String, outcome)
-        let winner = try XCTUnwrap((settled["answered_by"] as? [String: Any])?["label"] as? String)
-        XCTAssertEqual(receipt.label, "Answered by \(winner)")
+        XCTAssertEqual(settled["state"] as? String, "settled")
+        XCTAssertNil(settled["answered_by"])
         attachScreenshot(screenshot)
     }
 

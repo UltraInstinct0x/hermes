@@ -386,13 +386,15 @@ The design also gives ⌥⌘↓ to "next mention"; in group chats the mention pi
   fills, and VoiceOver reads both choices ("This App", "Other Platforms, Unread").
 - **Needs You** shows open requests across connected profiles and gateways, including chats not
   open on this device. It refreshes on connect, when the app returns or the network comes back,
-  on request frames and every 30 seconds while visible. An approval can be denied by its exact
-  ID or allowed once if the whole command is shown. Flagged approvals must be opened in their
-  chat, as must approvals whose live card could not be checked. Requests show the Bot and chat when known, and a chat already represented by
-  its request doesn't repeat below the ledger. **Earlier** shows
-  recent outcomes, who answered when known, and pages older results. A source that can't be
-  checked is shown separately rather than counted as empty. Older gateways still show open
-  requests from their chat snapshots, without history.
+  on request frames and every 30 seconds while visible. The box ledger is read-only. To answer
+  an approval, Hermes attaches to its owning session and verifies the raw request ID in its
+  live snapshot. Allow Once appears only when the whole command is shown. Open the chat for
+  flagged approvals or when Hermes can't verify the live card. Requests show the Bot and chat
+  when known; a chat already represented by its request doesn't repeat below the ledger.
+  **Earlier** pages older settlements; the box doesn't report outcomes or answerers. "Answer
+  sent from this device" means the app wrote the answer, not that the gateway confirmed it won.
+  A source that can't be checked is shown separately. Without the box, available chat snapshots
+  show open requests without history.
 - **Show** picks which chats the list holds, by the session's `source`
   ([sessions-and-models.md](sessions-and-models.md) §1; `SessionOrigin`, `InboxShow`):
   - **This App**, the default: chats started here, in Hermes Desktop or another API client (no

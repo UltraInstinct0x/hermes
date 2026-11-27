@@ -45,7 +45,7 @@ struct NeedsYouRows: View {
             if !rows.isEmpty || feed.moreHistory && !(snapshot.sources ?? []).isEmpty {
                 SidebarSectionTitle(title: String(localized: "Earlier"))
                 ForEach(rows) { row in
-                    entry(row, detail: historyDetail(row)) { EmptyView() }
+                    entry(row, detail: feed.receipts[row.id] ?? historyDetail(row)) { EmptyView() }
                 }
                 if feed.moreHistory {
                     SidebarNavRow(title: "Load Earlier", symbol: "clock") {
@@ -131,6 +131,8 @@ struct NeedsYouRows: View {
     private func historyDetail(_ row: LedgerRow) -> String {
         switch row.state {
         case "answered": NeedsYouFeed.answeredBy(row.answeredBy)
+        case "settled": String(localized: "Resolved")
+        case "unverified": String(localized: "No longer tracked")
         case "lost_on_restart": String(localized: "Gateway restarted before this was answered")
         case "expired": String(localized: "Timed out")
         default: String(localized: "No longer pending")

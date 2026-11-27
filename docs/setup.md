@@ -237,8 +237,8 @@ Where `can_apply` (a git checkout), Update Hermes… updates it from the app, af
 `HermesUpdateStart`, `HermesUpdateStatus.outcome(actionID:)` and `HermesUpdateRun` (HermesKit)
 hold these rules; `SetupCenter.updateHermes()` runs it.
 
-**Needs You** checks each source separately. A source with a working ledger is Ready; an older
-source is Partly set up and falls back to open chat requests without history. Not authorized means
+**Needs You** checks each source separately. A source with a working box ledger is Ready; without
+the box read view, available chat snapshots show open requests without history. Not authorized means
 signing in with access to that profile; an offline or failed source is Can't check. Check Again
 refreshes these states without answering or opening any request.
 

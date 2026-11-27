@@ -26,6 +26,7 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
     public let createdAt: TimeInterval
     public let expiresAt: TimeInterval?
     public let answeredAt: TimeInterval?
+    public let settledAt: TimeInterval?
     public let answeredBy: LedgerAnswerer?
 
     public struct ID: Sendable, Hashable {
@@ -41,11 +42,11 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
     }
 
     public func approval(in snapshot: JSONValue) -> ApprovalRequest? {
-        guard kind == "approval", let ledgerID else { return nil }
+        guard kind == "approval", requestID.hasPrefix("srq-"), requestID.count > 4 else { return nil }
         for frame in snapshot["open_requests"]?.arrayValue ?? [] {
-            guard frame["method"]?.stringValue == "approval", let id = frame["id"]?.stringValue,
-                  let params = frame["params"], params["ledger_id"]?.stringValue == ledgerID else { continue }
-            return GatewayTurnDecoder.approval(from: .init(id: id, method: "approval", params: params))
+            guard frame["method"]?.stringValue == "approval", frame["id"]?.stringValue == requestID,
+                  let params = frame["params"] else { continue }
+            return GatewayTurnDecoder.approval(from: .init(id: requestID, method: "approval", params: params))
         }
         return nil
     }
@@ -54,6 +55,7 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
         case ledgerID = "ledger_id", requestID = "request_id", gatewayID = "gateway_id"
         case profileID = "profile_id", sessionID = "session_id"
         case createdAt = "created_at", expiresAt = "expires_at", answeredAt = "answered_at", answeredBy = "answered_by"
+        case settledAt = "settled_at"
         case profile, kind, state, prompt, choices, outcome
     }
 }
@@ -108,7 +110,9 @@ public struct LedgerSnapshot: Decodable, Sendable, Equatable {
     }
 
     public static func merge(_ snapshots: [Self]) -> Self {
-        let recent = unique(snapshots.flatMap(\.recent).sorted { ($0.answeredAt ?? $0.createdAt) > ($1.answeredAt ?? $1.createdAt) })
+        let recent = unique(snapshots.flatMap(\.recent).sorted {
+            ($0.settledAt ?? $0.answeredAt ?? $0.createdAt) > ($1.settledAt ?? $1.answeredAt ?? $1.createdAt)
+        })
         let settled = Set(recent.map(\.id))
         let open = unique(snapshots.flatMap(\.open).sorted { $0.createdAt < $1.createdAt }).filter { !settled.contains($0.id) }
         var seen = Set<LedgerSource.ID>()

@@ -12,8 +12,8 @@ extension LedgerSource {
             return SetupStatus(id: id, state: .ready, title: title)
         case .unsupported:
             return SetupStatus(id: id, state: .limited, title: title,
-                               fallback: String(localized: "\(source): open chats still show their requests. History needs a newer Hermes."),
-                               steps: [.updateHermes])
+                               fallback: String(localized: "\(source): open chats still show their requests."),
+                               steps: [SetupStep(String(localized: "Set up the box ledger to see earlier requests."))])
         case .notAuthorized:
             return SetupStatus(id: id, state: .notSetUp, title: title,
                                detail: String(localized: "\(source): not authorized."),
@@ -49,19 +49,13 @@ final class NeedsYouFeed {
         case box(BackendClient, String)
     }
 
-    private enum HistoryRoute: Hashable {
-        case box(UUID)
-        case direct(LedgerSource.ID)
-    }
-
     private enum Cursor {
         case box(String)
-        case direct(TimeInterval)
         case end
     }
 
     @ObservationIgnored private var routes: [LedgerRow.ID: Route] = [:]
-    @ObservationIgnored private var cursors: [HistoryRoute: Cursor] = [:]
+    @ObservationIgnored private var cursors: [UUID: Cursor] = [:]
     @ObservationIgnored private var boxWorkspaces: Set<UUID> = []
     @ObservationIgnored private var boxLiveSources: [UUID: Set<LedgerSource.ID>] = [:]
     @ObservationIgnored private var refreshing = false
@@ -89,13 +83,13 @@ final class NeedsYouFeed {
                         for row in box.open {
                             if let alias = row.gatewayID { routing[row.id] = .box(backend, alias) }
                         }
-                        let sources = (box.sources ?? []).compactMap { item -> RequestLedgerClient.Source? in
-                            guard item.state == .unsupported, let profile = item.profileID else { return nil }
-                            let route = Route.box(backend, item.gatewayID)
-                            return Self.source(item.id, profile: profile, route: route)
-                        }
-                        if !sources.isEmpty {
-                            snapshots.append(try await RequestLedgerClient.snapshot(sources: sources, federated: { box }))
+                        for source in box.sources ?? [] where source.state == .unsupported {
+                            guard let profile = source.profileID else { continue }
+                            let route = Route.box(backend, source.gatewayID)
+                            if let rows = try? await Self.legacyRows(source.id, profile: profile, route: route) {
+                                snapshots.append(.init(open: rows, recent: [], openCount: rows.count, sources: nil))
+                                for row in rows where routing[row.id] == nil { routing[row.id] = route }
+                            }
                         }
                         continue
                     }
@@ -104,12 +98,21 @@ final class NeedsYouFeed {
                                              state: RequestLedgerClient.state(of: error))]
                     snapshots.append(LedgerSnapshot(open: [], recent: [], openCount: 0, sources: coverage))
                 }
-                let sources = directSources(workspace, roster: roster)
-                if let local = try? await RequestLedgerClient.snapshot(sources: sources) {
-                    snapshots.append(local)
-                    coverage += local.sources ?? []
-                    for row in local.open where routing[row.id] == nil { routing[row.id] = .direct(roster) }
+                let profiles = roster.profiles.map(\.name)
+                var open: [LedgerRow] = []
+                let route = Route.direct(roster)
+                for profile in profiles.isEmpty ? ["default"] : profiles {
+                    let source = LedgerSource.ID(gatewayID: workspace.id.uuidString, profileID: profile)
+                    do {
+                        let rows = try await Self.legacyRows(source, profile: profile, route: route)
+                        for row in rows where routing[row.id] == nil { routing[row.id] = route }
+                        open += rows
+                        coverage.append(.init(id: source, state: .unsupported))
+                    } catch {
+                        coverage.append(.init(id: source, state: RequestLedgerClient.state(of: error)))
+                    }
                 }
+                snapshots.append(.init(open: open, recent: [], openCount: open.count, sources: coverage))
                 workspace.ledgerSources = coverage
             }
             guard !Task.isCancelled else { return }
@@ -120,7 +123,7 @@ final class NeedsYouFeed {
             }
             routes = routing
             for (workspaceID, live) in liveBoxSources where !live.isSubset(of: boxLiveSources[workspaceID] ?? []) {
-                cursors.removeValue(forKey: .box(workspaceID))
+                cursors.removeValue(forKey: workspaceID)
             }
             boxWorkspaces = boxes
             boxLiveSources = liveBoxSources
@@ -128,78 +131,70 @@ final class NeedsYouFeed {
         } while needsRefresh && !Task.isCancelled
     }
 
-    private func directSources(_ workspace: BotWorkspace, roster: BotRoster) -> [RequestLedgerClient.Source] {
-        let profiles = roster.profiles.map(\.name)
-        return (profiles.isEmpty ? ["default"] : profiles).map { profile in
-            Self.source(.init(gatewayID: workspace.id.uuidString, profileID: profile), profile: profile, route: .direct(roster))
+    private static func legacyRows(_ id: LedgerSource.ID, profile: String, route: Route) async throws -> [LedgerRow] {
+        try await Self.withRoute(route) { request in
+            let listing = try await request("session.list", [
+                "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
+            ])
+            var rows: [LedgerRow] = []
+            for session in listing["sessions"]?.arrayValue ?? [] {
+                guard let key = session["resolved_id"]?.stringValue ?? session["id"]?.stringValue else { continue }
+                let snapshot = try await request("session.resume", Self.resume(key, profile: profile))
+                rows += RequestLedgerClient.legacyRows(snapshot: snapshot, sessionID: key, source: id)
+            }
+            return rows
         }
     }
 
-    private static func source(_ id: LedgerSource.ID, profile: String, route: Route) -> RequestLedgerClient.Source {
-        .init(id: id, client: .init { method, params in
-            try await Self.withRoute(route) { try await $0(method, params) }
-        }, legacy: {
-            try await Self.withRoute(route, readOnly: true) { request in
-                let listing = try await request("session.list", [
-                    "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
-                ])
-                var rows: [LedgerRow] = []
-                for session in listing["sessions"]?.arrayValue ?? [] {
-                    guard let key = session["resolved_id"]?.stringValue ?? session["id"]?.stringValue else { continue }
-                    let snapshot = try await request("session.resume", [
-                        "session_id": .string(key), "profile": .string(profile), "omit_messages": .bool(true),
-                    ])
-                    rows += RequestLedgerClient.legacyRows(snapshot: snapshot, sessionID: key, source: id)
-                }
-                return rows
-            }
-        })
+    private static func withRoute<T: Sendable>(
+        _ route: Route, perform: @Sendable (@escaping RequestLedgerClient.Transport) async throws -> T
+    ) async throws -> T {
+        try await withSocket(route, receivesServerRequests: false) { socket in
+            try await perform { try await socket.request($0, $1, timeout: .seconds(10)) }
+        }
     }
 
-    private static func withRoute<T: Sendable>(
-        _ route: Route, readOnly: Bool = false, perform: @Sendable (@escaping RequestLedgerClient.Transport) async throws -> T
+    private static func withSocket<T: Sendable>(
+        _ route: Route, receivesServerRequests: Bool, perform: @Sendable (GatewaySocket) async throws -> T
     ) async throws -> T {
         let socket: GatewaySocket
         switch route {
         case .direct(let roster):
-            if !readOnly {
-                return try await perform { try await roster.request($0, $1, timeout: .seconds(10)) }
-            }
             socket = GatewaySocket(url: try await roster.backendClient.gatewaySocketURL())
         case .box(let backend, let alias):
             socket = try await backend.ledgerSocket(gatewayID: alias, identity: .hermesApp)
         }
         defer { Task { await socket.close() } }
-        try await socket.connect(receivesServerRequests: !readOnly)
-        return try await perform { try await socket.request($0, $1, timeout: .seconds(10)) }
+        try await socket.connect(receivesServerRequests: receivesServerRequests)
+        return try await perform(socket)
     }
 
     func inlineChoices(_ row: LedgerRow) -> [ApprovalChoice] {
-        guard routes[row.id] != nil, receipts[row.id] == nil,
+        guard routes[row.id] != nil, row.sessionID?.isEmpty == false, receipts[row.id] == nil,
               row.expiresAt.map({ $0 > Date.now.timeIntervalSince1970 }) ?? true,
               let approval = requestNames[row.id]?.approval,
               !approval.smartDenied, !approval.isMemorySave, !approval.isPaymentFill else { return [] }
         return approval.choices.filter { choice in
-            guard row.choices?.contains(.string(choice.rawValue)) == true else { return false }
-            return choice == .deny || choice == .once && approval.command.map(ApprovalCard.showsWholeInBatch) == true
+            choice == .deny || choice == .once && approval.command.map(ApprovalCard.showsWholeInBatch) == true
         }
     }
 
     func answer(_ row: LedgerRow, choice: ApprovalChoice, workspaces: [BotWorkspace]) async {
-        guard inlineChoices(row).contains(choice), let id = row.ledgerID, let route = routes[row.id],
+        guard inlineChoices(row).contains(choice), let session = row.sessionID, let route = routes[row.id],
+              let shown = requestNames[row.id]?.approval,
               answering.insert(row.id).inserted else { return }
         defer { answering.remove(row.id) }
         do {
-            let answer = try await Self.withRoute(route) { transport in
-                try await RequestLedgerClient(transport: transport).answer(ledgerID: id, profile: row.profileID ?? row.profile,
-                                                                            result: ["choice": .string(choice.rawValue)])
+            let sent = try await Self.withSocket(route, receivesServerRequests: true) { socket in
+                let snapshot = try await socket.request("session.resume", Self.resume(session, profile: row.profileID ?? row.profile),
+                                                        timeout: .seconds(10))
+                guard let live = row.approval(in: snapshot), !live.smartDenied, !live.isMemorySave, !live.isPaymentFill,
+                      live.command == shown.command, live.choices.contains(choice) else { return false }
+                guard await socket.respond(to: row.requestID, result: .object(["choice": .string(choice.rawValue)]))
+                else { throw URLError(.networkConnectionLost) }
+                return true
             }
-            switch answer {
-            case .accepted(let winner):
-                receipts[row.id] = Self.answeredBy(winner)
-            case .noLongerPending(let settlement):
-                receipts[row.id] = settlement?.answeredBy.map { Self.answeredBy($0) } ?? String(localized: "No longer pending")
-            }
+            receipts[row.id] = sent ? String(localized: "Answer sent from this device") : String(localized: "No longer pending")
             await refresh(workspaces)
         } catch {
             receipts[row.id] = String(localized: "Couldn't answer. Check again.")
@@ -247,7 +242,7 @@ final class NeedsYouFeed {
     func loadRequestNames(_ row: LedgerRow) async {
         guard requestNames[row.id] == nil, let route = routes[row.id] else { return }
         let profile = row.profileID ?? row.profile
-        let names = try? await Self.withRoute(route, readOnly: true) { request in
+        let names = try? await Self.withRoute(route) { request in
             let profiles = try? await request("profiles.list", ["include_sessions": .bool(false)])
             let installID = profiles?["install_id"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
             let bot = profiles?["profiles"]?.arrayValue?.first { $0["name"]?.stringValue == profile }.map(BotProfile.init(json:))
@@ -259,10 +254,8 @@ final class NeedsYouFeed {
                 $0["id"]?.stringValue == id || $0["resolved_id"]?.stringValue == id
             }
             let approval: ApprovalRequest?
-            if row.kind == "approval", row.ledgerID != nil,
-               let snapshot = try? await request("session.resume", [
-                   "session_id": .string(id), "profile": .string(profile), "omit_messages": .bool(true),
-               ]) {
+            if row.kind == "approval",
+               let snapshot = try? await request("session.resume", Self.resume(id, profile: profile)) {
                 approval = row.approval(in: snapshot)
             } else {
                 approval = nil
@@ -270,6 +263,10 @@ final class NeedsYouFeed {
             return RequestNames(installID: installID, bot: bot?.title, chat: chat?["title"]?.stringValue, approval: approval)
         }
         if let names { requestNames[row.id] = names }
+    }
+
+    private static func resume(_ session: String, profile: String) -> [String: JSONValue] {
+        ["session_id": .string(session), "profile": .string(profile), "omit_messages": .bool(true)]
     }
 
     func represents(_ session: HermesSession, in workspace: BotWorkspace, app: AppModel) -> Bool {
@@ -287,26 +284,13 @@ final class NeedsYouFeed {
         for workspace in workspaces {
             guard let roster = workspace.roster else { continue }
             if boxWorkspaces.contains(workspace.id) {
-                let key = HistoryRoute.box(workspace.id)
+                let key = workspace.id
                 if case .end? = cursors[key] { continue }
                 let before: String?
                 if case .box(let cursor)? = cursors[key] { before = cursor } else { before = nil }
                 if let page = try? await roster.backendClient.federatedLedgerHistory(before: before) {
                     rows += page.requests.filter { $0.state != "open" }
                     cursors[key] = page.nextBefore.map(Cursor.box) ?? .end
-                }
-            } else {
-                for source in directSources(workspace, roster: roster) {
-                    guard let profile = source.id.profileID,
-                          workspace.ledgerSources.contains(where: { $0.id == source.id && $0.state == .live }) else { continue }
-                    let key = HistoryRoute.direct(source.id)
-                    if case .end? = cursors[key] { continue }
-                    let before: TimeInterval?
-                    if case .direct(let cursor)? = cursors[key] { before = cursor } else { before = nil }
-                    if let page = try? await source.client.history(profile: profile, gatewayID: source.id.gatewayID, before: before) {
-                        rows += page.requests
-                        cursors[key] = page.nextBefore.map(Cursor.direct) ?? .end
-                    }
                 }
             }
         }
@@ -316,16 +300,9 @@ final class NeedsYouFeed {
     }
 
     private func updateMoreHistory(_ workspaces: [BotWorkspace]) {
-        let choices = workspaces.flatMap { workspace -> [HistoryRoute] in
-            if boxWorkspaces.contains(workspace.id) {
-                return boxLiveSources[workspace.id]?.isEmpty == false ? [.box(workspace.id)] : []
-            }
-            return workspace.ledgerSources.filter { $0.state == .live && $0.profileID != nil }
-                .map { .direct($0.id) }
-        }
-        moreHistory = choices.contains { key in
-            if case .end? = cursors[key] { return false }
-            return true
+        moreHistory = workspaces.contains { workspace in
+            if case .end? = cursors[workspace.id] { return false }
+            return boxLiveSources[workspace.id]?.isEmpty == false
         }
     }
 }
