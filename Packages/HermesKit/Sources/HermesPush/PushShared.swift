@@ -74,6 +74,11 @@ public final class PushShared: @unchecked Sendable {
         set { encode(newValue, "push.preferences") }
     }
 
+    public var requestsOnlyAuthorization: Bool {
+        get { defaults.bool(forKey: "push.requestsOnlyAuthorization") }
+        set { defaults.set(newValue, forKey: "push.requestsOnlyAuthorization") }
+    }
+
     // MARK: Gateways
 
     /// Gateways that answered `register`, by the relay installation id their notices carry.
@@ -135,7 +140,7 @@ public final class PushShared: @unchecked Sendable {
 
     public func gatewayCheck(appID: UUID, hasToken: Bool, canNotify: Bool) -> GatewayCheck {
         if isPushStopped(appID: appID) { return .stopped }
-        return hasToken && canNotify ? .register : .status
+        return hasToken && canNotify && !requestsOnlyAuthorization ? .register : .status
     }
 
     /// Gateways this device left with Stop Notifications, by app id. Kept on disk, so a relaunch, a

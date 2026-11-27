@@ -20,7 +20,10 @@ final class NeoRemotePlatform: RemoteNotificationPlatform {
         switch await center.notificationSettings().authorizationStatus {
         case .authorized, .provisional, .ephemeral: return true
         case .denied: return false
-        default: return (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        case .notDetermined:
+            PushCenter.shared.reserveAuthorizationForRequests()
+            return (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        @unknown default: return false
         }
     }
 

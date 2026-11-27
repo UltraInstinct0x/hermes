@@ -49,6 +49,11 @@ final class PushCenter {
     }
 
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
+    #if os(iOS)
+    private var requestsOnlyAuthorization = PushShared.current.requestsOnlyAuthorization {
+        didSet { shared.requestsOnlyAuthorization = requestsOnlyAuthorization }
+    }
+    #endif
     private(set) var showPreviews: UNShowPreviewsSetting = .always
     private(set) var timeSensitive: UNNotificationSetting = .notSupported
     private(set) var deviceToken: String?
@@ -270,10 +275,24 @@ final class PushCenter {
         )) ?? false
         await refreshAuthorization()
         #if os(iOS)
-        if granted { UIApplication.shared.registerForRemoteNotifications() }
+        if granted {
+            let wasRequestsOnly = requestsOnlyAuthorization
+            requestsOnlyAuthorization = false
+            UIApplication.shared.registerForRemoteNotifications()
+            if wasRequestsOnly, deviceToken != nil {
+                registeredAt.removeAll()
+                await tick()
+            }
+        }
         #endif
         prime = nil
     }
+
+    #if os(iOS)
+    func reserveAuthorizationForRequests() {
+        requestsOnlyAuthorization = true
+    }
+    #endif
 
     /// A moment worth asking in: the first approval, a turn that ran over 30 s, or leaving while
     /// one runs. Never at launch; away from the app, on the way back. After Not Now, once more a
@@ -325,7 +344,7 @@ final class PushCenter {
 
     var canNotify: Bool {
         #if os(iOS)
-        authorization == .authorized || authorization == .provisional || authorization == .ephemeral
+        !requestsOnlyAuthorization && (authorization == .authorized || authorization == .provisional || authorization == .ephemeral)
         #else
         authorization == .authorized || authorization == .provisional
         #endif
