@@ -299,13 +299,7 @@ final class NeedsYouFeed {
                   let questionId else { return .noLongerWaiting }
             do {
                 let sent = try await Self.answerOnOwner(row, session: ref.sessionId, route: route) { snapshot in
-                    guard snapshot["stored_session_id"]?.stringValue == ref.sessionId || snapshot["session_id"]?.stringValue == ref.sessionId,
-                          let frame = row.openRequest(in: snapshot),
-                          let request = HermesRequest.parse(frame), case .clarify(let questions) = request.kind,
-                          questions.count == 1, let question = questions.first, question.id == questionId,
-                          question.question == shown, !question.multiSelect,
-                          frame.params["answers"]?[questionId] == nil, question.choices.contains(answer) else { return nil }
-                    return .object(["answers": .object([questionId: .string(answer)])])
+                    row.frameClarificationChoice(in: snapshot, questionID: questionId, shown: shown, answer: answer)
                 }
                 let outcome: RequestActivityAttributes.ContentState.Outcome = sent ? .answered : .noLongerWaiting
                 receipts[row.id] = RequestActivityPresentation.finalLine(outcome, answeredBy: nil)

@@ -94,6 +94,17 @@ public struct LedgerRow: Decodable, Sendable, Identifiable, Equatable {
         return nil
     }
 
+    public func frameClarificationChoice(in snapshot: JSONValue, questionID: String, shown: String, answer: String) -> JSONValue? {
+        guard kind == "clarify", let sessionID, !sessionID.isEmpty,
+              ["session_id", "stored_session_id", "resumed"].contains(where: { snapshot[$0]?.stringValue == sessionID }),
+              let frame = openRequest(in: snapshot),
+              let request = HermesRequest.parse(frame), case .clarify(let questions) = request.kind,
+              questions.count == 1, let question = questions.first, question.id == questionID,
+              question.question == shown, !question.multiSelect,
+              frame.params["answers"]?[questionID] == nil, question.choices.contains(answer) else { return nil }
+        return .object(["answers": .object([questionID: .string(answer)])])
+    }
+
     enum CodingKeys: String, CodingKey {
         case ledgerID = "ledger_id", requestID = "request_id", gatewayID = "gateway_id"
         case profileID = "profile_id", sessionID = "session_id"

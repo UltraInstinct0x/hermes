@@ -73,6 +73,26 @@ import Testing
         #expect(ExactClarifyAnswer.questions(in: ledger, ledgerID: "second") == nil)
     }
 
+    @Test func frameClarificationMatchesTheStoredSessionInLegacyResume() throws {
+        let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
+            {"request_id":"srq-target","session_id":"stored","profile":"default","kind":"clarify","state":"open","created_at":2}
+            """)))
+        func resume(_ stored: String, _ requestID: String = "srq-target") throws -> JSONValue {
+            try #require(JSONValue.parse("""
+                {"session_id":"runtime","resumed":"\(stored)","open_requests":[
+                  {"id":"\(requestID)","method":"clarify","params":{"questions":[{"qid":"region","question":"Which region?","choices":["US","EU"]}]}}
+                ]}
+                """))
+        }
+        let snapshot = try resume("stored")
+        #expect(row.frameClarificationChoice(in: snapshot, questionID: "region", shown: "Which region?", answer: "EU")
+            == .object(["answers": .object(["region": .string("EU")])]))
+        #expect(row.frameClarificationChoice(in: try resume("other"), questionID: "region", shown: "Which region?", answer: "EU") == nil)
+        #expect(row.frameClarificationChoice(in: try resume("stored", "srq-other"),
+                                             questionID: "region", shown: "Which region?", answer: "EU") == nil)
+        #expect(row.frameClarificationChoice(in: snapshot, questionID: "region", shown: "Which region?", answer: "") == nil)
+    }
+
     private actor Gateway {
         var calls: [[String: JSONValue]] = []
         let identity: JSONValue = .object(["client_id": .string("phone"), "label": .string("iPhone"), "kind": .string("ios")])
