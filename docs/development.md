@@ -69,6 +69,9 @@ team and their own tools.
 cd Packages/HermesKit && swift test
 # plus a round trip over a real WebSocket against the mock backend:
 HERMES_MOCK_BACKEND=http://127.0.0.1:19119 swift test --filter BackendIntegrationTests
+# Bot Mode's password sign-in, against a backend started with --password pw (and --webapp-gateway):
+HERMES_MOCK_BACKEND=http://127.0.0.1:19119 HERMES_MOCK_BACKEND_PASSWORD=pw \
+  HERMES_MOCK_BACKEND_WEBAPP=0123456789abcdef swift test --filter BackendSignInIntegrationTests
 # how long a 50 KB reply takes to parse and tint as it streams, in release (about 80 s):
 HERMES_STREAMING_TIMING=1 swift test -c release -Xswiftc -enable-testing --filter StreamingTiming
 ```
@@ -295,6 +298,7 @@ an active worker and a routine that posts every couple of minutes):
 ```bash
 python3 Tools/mock-hermes/backend.py --port 19119            # ungated: Automatic sign-in
 python3 Tools/mock-hermes/backend.py --port 19119 --password pw   # gated: admin / pw
+python3 Tools/mock-hermes/backend.py --port 19119 --password pw --webapp-gateway 0123456789abcdef
 python3 Tools/mock-hermes/backend.py --port 19119 --auth-providers session-token
 python3 Tools/mock-hermes/backend.py --port 19119 --api-server-only
 ```
@@ -309,6 +313,16 @@ token in Edit Gateway, and count the log's `401` lines and `socket refused` line
 one or two, a stopped Bot Mode sends nothing until something changes. The same holds when the
 address stops being a backend mid-session: sign in to a `--password` backend, then restart it on
 the same port with `--api-server-only`, and the refused lines stop after the first one or two.
+
+`--webapp-gateway <id>` (with `--password`) signs in as a gateway's Webapp does from 0.23.0 on: the
+id is 16 lowercase hex characters, every sign-in cookie is named `<name>_<id>`
+(`hermes_session_at_<id>`, `_rt_`, `_provider_` and the `hermes_webapp_signin_<id>` binding), and
+`X-Forwarded-Proto: https` adds the `__Host-` prefix (`__Secure-` with `X-Forwarded-Prefix`). A
+request without the binding is refused 401 `signed_out`, without the access cookie `no_cookie`, in
+Hermes's JSON. The log names the cookies the app sends whenever they change, never their values.
+To see a new sign-in replace the old cookies, sign in to a `--password` backend, restart it on the
+same port with `--webapp-gateway`, sign in again, and the next `cookies sent:` line names only the
+suffixed cookies.
 
 and turn on **Bot Mode** for the gateway with `127.0.0.1:19119`, or add
 `HERMES_BOOTSTRAP_BACKEND=http://127.0.0.1:19119` to the Debug launch environment. "approve",
@@ -453,6 +467,18 @@ every idle chat's session as another client's `session.close` would, with the so
 next upload or prompt on it answers 4001 "session not found", and the app resumes and sends again.
 `--hermes-version` (default 0.21.6) is the version `/api/status` reports; before 0.23.1 the socket
 closes with 1009 on a message over 16 MiB, as uvicorn's did, so a file over about 12 MB never arrives.
+`--session-authority` (with `--hermes-version 0.23.3` or newer) serves the socket as Hermes's session
+authority does: `gateway.ready` says `session_authority: true`, a `prompt.submit` without a
+`submission_id` answers 4001 `invalid_params` (with `data.reason`), the same id again is the same
+admission and never a second turn, every new message's receipt says `queued` (an idle chat's too;
+a steer says `started`), a closed session answers 4001 `not_found`, a `prompt.submit` from a socket
+that didn't create or resume the chat answers 4001 `permission_denied` (checked in that order, then
+the keys; `image.attach_bytes` is refused the same way), and `session.title` answers -32601. A
+`command.dispatch` without a session, or with one that is closed or of another profile than the one
+it names, answers 4001 `not_found`, and a command Hermes doesn't have answers 4001
+`unsupported_command` where the legacy dispatcher says 4018. The log prints each admission, each
+command and each refusal, and each `session.list` and `session.create`. Without it, a
+`prompt.submit` key the legacy dispatcher doesn't know answers 4000, as on Hermes.
 `session.steer` refuses 4010 "agent does not support steer" in a turn's first half second (its
 agent being built; 6 s when the message says "cold start", as on a loaded Mac) and answers `rejected` when idle; while Hermes compacts the chat (a "snapshot"
 message with "compact", or a Bot Chat's "slow … compact", compacts for 8 s after its first step,

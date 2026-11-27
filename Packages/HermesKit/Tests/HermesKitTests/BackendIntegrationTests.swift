@@ -16,6 +16,56 @@ struct BackendIntegrationTests {
         return (client, socket)
     }
 
+    private func submit(_ submit: PromptSubmitContract, on socket: GatewaySocket) async throws -> JSONValue {
+        try await socket.request("prompt.submit", submit.params(sessionAuthority: await socket.sessionAuthority))
+    }
+
+    /// The mock with `--session-authority` takes a message only with its submission id, the same id
+    /// again is the same admission, and only from a socket that created or resumed the chat; without
+    /// it, an unknown key is refused as Hermes does (4000).
+    @Test func promptSubmitMatchesTheDispatcher() async throws {
+        let (_, socket) = try await connect()
+        defer { Task { await socket.close() } }
+        let created = try await socket.request("session.create", ["profile": .string("default"), "title": .string("scratch")])
+        let runtime = try #require(created["session_id"]?.stringValue)
+        let message = PromptSubmitContract(sessionID: runtime, text: "Hello", queued: false)
+        if await socket.sessionAuthority {
+            let bare = await #expect(throws: GatewayRPCError.self) {
+                try await socket.request("prompt.submit", message.params(sessionAuthority: false))
+            }
+            #expect(bare?.code == 4001)
+            #expect(bare?.refusalReason == "invalid_params")
+            let first = try await submit(message, on: socket)
+            let again = try await submit(message, on: socket)
+            #expect(first["admission_id"] != nil)
+            #expect(first["status"]?.stringValue == "queued")  // an idle chat's receipt too
+            #expect(again["admission_id"] == first["admission_id"])
+            // Another socket holds none of this one's chats until it resumes one.
+            let (_, other) = try await connect()
+            defer { Task { await other.close() } }
+            var next = PromptSubmitContract(sessionID: runtime, text: "Again")
+            let unresumed = await #expect(throws: GatewayRPCError.self) { try await submit(next, on: other) }
+            #expect(unresumed?.refusalReason == "permission_denied")
+            // A photo upload is refused the same way, so the send resumes for it too.
+            let upload = await #expect(throws: GatewayRPCError.self) {
+                try await other.request("image.attach_bytes", ["session_id": .string(runtime), "content_base64": .string("AA=="), "filename": .string("image-1.jpg")])
+            }
+            #expect(upload.map(PromptSubmitContract.isStaleSession) == true)
+            let stored = try #require(created["stored_session_id"]?.stringValue)
+            let resumed = try await other.request("session.resume", ["session_id": .string(stored), "profile": .string("default")])
+            next.sessionID = try #require(resumed["session_id"]?.stringValue)
+            #expect(try await submit(next, on: other)["admission_id"] != nil)
+        } else {
+            var params = message.params(sessionAuthority: false)
+            params["submission_id"] = .string(message.submissionID)
+            let unknown = await #expect(throws: GatewayRPCError.self) {
+                try await socket.request("prompt.submit", params)
+            }
+            #expect(unknown?.code == 4000)
+            _ = try await submit(message, on: socket)
+        }
+    }
+
     @Test func rosterAndTranscript() async throws {
         let (client, socket) = try await connect()
         defer { Task { await socket.close() } }
@@ -49,7 +99,7 @@ struct BackendIntegrationTests {
         let runtime = try #require(resumed["session_id"]?.stringValue)
 
         let messages = await socket.messages()
-        _ = try await socket.request("prompt.submit", ["session_id": .string(runtime), "text": .string("What's new?")])
+        _ = try await submit(PromptSubmitContract(sessionID: runtime, text: "What's new?", queued: false), on: socket)
         var live = LiveTurn(id: "t", sessionID: runtime)
         var settled = false
         for await message in messages {
@@ -72,7 +122,7 @@ struct BackendIntegrationTests {
         let created = try await socket.request("session.create", ["profile": .string("default"), "title": .string("scratch")])
         let runtime = try #require(created["session_id"]?.stringValue)
         let messages = await socket.messages()
-        _ = try await socket.request("prompt.submit", ["session_id": .string(runtime), "text": .string("please approve the cleanup")])
+        _ = try await submit(PromptSubmitContract(sessionID: runtime, text: "please approve the cleanup", queued: false), on: socket)
         var answer = ""
         for await message in messages {
             switch message {
@@ -182,6 +232,32 @@ struct BackendIntegrationTests {
         try await client.restartGateway()
         _ = try await client.rest("api/mock/app-plugins", method: "POST", body: .object(["state": .string("current")]))
     }
+
+    /// A plugin command without a chat of its own (`docs/notifications.md` §1.2): the session
+    /// authority refuses it without a session of the profile it names, so the socket runs it in that
+    /// profile's Bot Chat; the legacy dispatcher gets it as it always did. Both answer it.
+    @Test func aCommandWithoutAChatRunsOnBoth() async throws {
+        let (_, socket) = try await connect()
+        defer { Task { await socket.close() } }
+        let pending: [String: JSONValue] = ["name": .string("memory"), "arg": .string("pending")]
+        #expect(try await socket.request("command.dispatch", pending)["type"]?.stringValue == "exec")
+        var scout = pending
+        scout["profile"] = .string("scout")
+        // Several at once share one lookup per profile.
+        async let first = socket.request("command.dispatch", scout)
+        async let second = socket.request("command.dispatch", scout)
+        #expect(try await [first, second].map { $0["type"]?.stringValue } == ["exec", "exec"])
+        guard await socket.sessionAuthority else { return }
+        // A chat's own command keeps its chat, and a session that isn't there is refused.
+        var stray = pending
+        stray["session_id"] = .string("rt-gone")
+        let refused = await #expect(throws: GatewayRPCError.self) { try await socket.request("command.dispatch", stray) }
+        #expect(refused?.isSessionNotFound == true)
+        let missing = await #expect(throws: GatewayRPCError.self) {
+            try await socket.request("command.dispatch", ["name": .string("no-such-command")])
+        }
+        #expect(missing?.code == 4001 && missing?.refusalReason == "unsupported_command")
+    }
 }
 
 /// Read-only checks against a real local `hermes serve` (`HERMES_REAL_BACKEND=http://127.0.0.1:9119`).
@@ -210,5 +286,60 @@ struct RealBackendReadOnlyTests {
             print("[real]   routines: \(jobs.compactMap(BotRoutine.init(json:)).map { "\($0.title) [\($0.schedule)] bot=\($0.taggedBot ?? "-")" })")
         }
         #expect(!rows.isEmpty)
+    }
+}
+
+/// Bot Mode's password sign-in (`docs/connecting-and-voice.md` §1) against `backend.py --password`,
+/// given as `HERMES_MOCK_BACKEND_PASSWORD`. With `--webapp-gateway`, given as
+/// `HERMES_MOCK_BACKEND_WEBAPP`, it signs in as the gateway's Webapp: suffixed cookies and a binding.
+@Suite("Mock backend sign-in", .enabled(if: ProcessInfo.processInfo.environment["HERMES_MOCK_BACKEND"] != nil
+    && ProcessInfo.processInfo.environment["HERMES_MOCK_BACKEND_PASSWORD"] != nil))
+struct BackendSignInIntegrationTests {
+    private let environment = ProcessInfo.processInfo.environment
+    private var baseURL: URL { URL(string: environment["HERMES_MOCK_BACKEND"]!)! }
+    private var password: String { environment["HERMES_MOCK_BACKEND_PASSWORD"]! }
+
+    private var expectedNames: Set<String> {
+        guard let gateway = environment["HERMES_MOCK_BACKEND_WEBAPP"] else { return ["hermes_session_at", "hermes_session_rt"] }
+        let names = ["hermes_session_at", "hermes_session_rt", "hermes_session_provider", "hermes_webapp_signin"]
+        return Set(names.map { "\($0)_\(gateway)" })
+    }
+
+    private func savedCookies(_ client: BackendClient) async -> [String: String] {
+        guard case .cookies(let cookies)? = await client.credential else {
+            Issue.record("no cookies saved")
+            return [:]
+        }
+        return cookies
+    }
+
+    @Test func signingInStartsASessionAndSigningInAgainReplacesIt() async throws {
+        // Cookies from an earlier sign-in, another prefix and names from before the Webapp.
+        let earlier = ["hermes_session_at": "earlier", "hermes_session_rt": "earlier", "__Host-hermes_session_at": "earlier"]
+        let client = BackendClient(baseURL: baseURL, credential: .cookies(earlier))
+        try await client.signIn(username: "admin", password: password)
+        let first = await savedCookies(client)
+        #expect(Set(first.keys) == expectedNames)
+
+        // Signed in: the socket's ticket is minted with the cookies and the socket opens with it.
+        let socket = GatewaySocket(url: try await client.gatewaySocketURL())
+        try await socket.connect()
+        defer { Task { await socket.close() } }
+        #expect(!(try await socket.request("profiles.list")["profiles"].items.isEmpty))
+
+        try await client.signIn(username: "admin", password: password)
+        let second = await savedCookies(client)
+        #expect(Set(second.keys) == expectedNames)
+        let access = try #require(first.keys.first { $0.hasPrefix("hermes_session_at") })
+        #expect(second[access] != first[access])
+        _ = try await client.gatewaySocketURL()
+    }
+
+    @Test func aWrongPasswordIsRefused() async throws {
+        let client = BackendClient(baseURL: baseURL, credential: nil)
+        await #expect(throws: BackendClient.Failure.invalidCredentials) {
+            try await client.signIn(username: "admin", password: "not-" + password)
+        }
+        #expect(await client.credential == nil)
     }
 }

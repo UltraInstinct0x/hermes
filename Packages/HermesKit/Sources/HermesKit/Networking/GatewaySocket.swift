@@ -114,8 +114,16 @@ public struct GatewayRPCError: Error, Sendable, Equatable, LocalizedError {
     /// another Bot, a routine): Hermes takes one writer per chat, so this send waits its turn.
     public var isHeldElsewhere: Bool { code == 4090 && refusalReason == "SESSION_NOT_OWNED" }
 
-    /// The runtime session id is stale; re-resume by the stored id.
-    public var isSessionNotFound: Bool { code == 4001 }
+    /// The runtime session id is stale; re-resume by the stored id. Only Hermes's own refusals for a
+    /// session it doesn't have count: the legacy dispatcher's 4001 "session not found", which carries
+    /// no reason, and the session authority's 4001 `not_found`. Any other 4001 (`invalid_params`,
+    /// `permission_denied`, `runtime_draining`…) is a refusal to show, never a reason to resume,
+    /// except a submit's `permission_denied`, which only `PromptSubmitContract.isStaleSession` reads.
+    public var isSessionNotFound: Bool {
+        guard code == 4001 else { return false }
+        if let reason = refusalReason { return reason == "not_found" }
+        return message == "session not found"
+    }
 }
 
 /// A JSON-RPC 2.0 client for the Hermes backend gateway socket (`/api/ws`), the
@@ -178,6 +186,13 @@ public actor GatewaySocket {
     public private(set) var isOpen = false
     /// Identifies the backend process; a change means event watermarks are void.
     public private(set) var replayEpoch: String?
+    /// The socket is served by the gateway's session authority (`gateway.ready` said
+    /// `session_authority`, Hermes Agent 0.23.3 and newer), whose parameter rules differ from the
+    /// legacy dispatcher's (`PromptSubmitContract`). Read once per socket: a reconnect is a new one.
+    public private(set) var sessionAuthority = false
+    /// The Bot Chat each profile's commands run in on a session authority, by profile name ("" for
+    /// the gateway's own). Kept per socket, which is per backend process.
+    private var commandSessions: [String: Task<String, any Error>] = [:]
     /// Asked when the socket has heard nothing past `staleAfter`: true keeps it open, because the
     /// backend's machine still answers (Hermes's gateway, the process Telegram rides on), so the
     /// dashboard's event loop is frozen, not the link dead. Up to `longestStall`.
@@ -303,8 +318,44 @@ public actor GatewaySocket {
         subscribers[id] = nil
     }
 
-    /// Sends a request and waits for its response.
+    /// Sends a request and waits for its response. On a session authority a `command.dispatch`
+    /// that names no session carries its profile's Bot Chat (`CommandDispatchSession`), so every
+    /// caller, the app's one-off sockets included, asks the same way it always has.
     public func request(_ method: String, _ params: [String: JSONValue] = [:], timeout: Duration = .seconds(120)) async throws -> JSONValue {
+        guard CommandDispatchSession.needsSession(method: method, params: params, sessionAuthority: sessionAuthority) else {
+            return try await send(method, params, timeout: timeout)
+        }
+        let profile = CommandDispatchSession.profile(of: params)
+        return try await CommandDispatchSession.sending(params) { stale in
+            try await self.commandSession(profile: profile, replacing: stale)
+        } send: { params in
+            try await self.send(method, params, timeout: timeout)
+        }
+    }
+
+    /// The Bot Chat a command runs in, per profile, looked up once per socket: concurrent
+    /// commands share one lookup, so they never make two chats. `stale`, the session Hermes said
+    /// is gone, is looked up again, once for all the commands that found it gone.
+    private func commandSession(profile: String?, replacing stale: String?) async throws -> String {
+        let key = profile ?? ""
+        if let stale, let lookup = commandSessions[key], (try? await lookup.value) == stale {
+            if commandSessions[key] == lookup { commandSessions[key] = nil }
+        }
+        if let lookup = commandSessions[key] { return try await lookup.value }
+        let lookup = Task { try await CommandDispatchSession.openBotChat(profile: profile) { method, params in
+            try await self.send(method, params, timeout: .seconds(30))
+        } }
+        commandSessions[key] = lookup
+        do {
+            return try await lookup.value
+        } catch {
+            // A failed lookup is asked again by the next command, never kept.
+            if commandSessions[key] == lookup { commandSessions[key] = nil }
+            throw error
+        }
+    }
+
+    private func send(_ method: String, _ params: [String: JSONValue], timeout: Duration) async throws -> JSONValue {
         guard let task else { throw Failure.notConnected }
         nextID += 1
         let id = "r\(nextID)"
@@ -413,6 +464,7 @@ public actor GatewaySocket {
             if event.type == "gateway.ready" {
                 replayEpoch = event.payload["replay_epoch"]?.stringValue
                 serverHeartbeat = event.payload["heartbeat"]?.boolValue == true
+                sessionAuthority = event.payload["session_authority"]?.boolValue == true
                 startHeartbeat()
                 isReady = true
                 readyContinuation?.resume()

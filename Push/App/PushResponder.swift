@@ -277,13 +277,18 @@ enum PushResponder {
         guard let chat = notice.chatID else { throw Failure.unknownGateway }
         if case .bot(let profile)? = center.routing(in: workspace).destination(for: notice) {
             // A Bot Chat: its session lives in the Bot's profile, on the backend.
-            _ = try await withSocket(workspace) { request in
-                let resumed = try await request("session.resume", [
-                    "session_id": .string(chat), "profile": .string(profile), "omit_messages": .bool(true),
-                ])
-                guard let runtime = resumed["session_id"]?.stringValue else { throw Failure.expired }
-                return try await request("prompt.submit", ["session_id": .string(runtime), "text": .string(text)])
-            }
+            _ = try await withSocket(workspace, submitting: { request, submit in
+                func resume() async throws -> String {
+                    let resumed = try await request("session.resume", [
+                        "session_id": .string(chat), "profile": .string(profile), "omit_messages": .bool(true),
+                    ])
+                    guard let runtime = resumed["session_id"]?.stringValue else { throw Failure.expired }
+                    return runtime
+                }
+                // One id for the reply, so a resend after a stale session is the same message.
+                let reply = PromptSubmitContract(sessionID: try await resume(), text: text, queued: false)
+                return try await PromptSubmitContract.submittingOnce(reply, send: submit, resume: resume)
+            })
             return
         }
         guard let apiKey else { throw Failure.unknownGateway }
@@ -305,6 +310,8 @@ enum PushResponder {
     }
 
     typealias Request = RequestLedgerClient.Transport
+    /// `prompt.submit` with the params the socket carrying it takes (`PromptSubmitContract`).
+    typealias Submit = (_ submit: PromptSubmitContract) async throws -> JSONValue
 
     @MainActor
     private static func withLedgerSocket<Result>(
@@ -326,13 +333,30 @@ enum PushResponder {
     /// The gateway's backend socket: the live one if it's up, else a fresh one just for this.
     @MainActor
     static func withSocket<Result>(_ workspace: BotWorkspace, _ body: @MainActor (@escaping Request) async throws -> Result) async throws -> Result {
+        try await withSocket(workspace, submitting: { request, _ in try await body(request) })
+    }
+
+    /// `withSocket`, for a body that also sends a message.
+    @MainActor
+    static func withSocket<Result>(
+        _ workspace: BotWorkspace,
+        submitting body: @MainActor (@escaping Request, @escaping Submit) async throws -> Result
+    ) async throws -> Result {
         guard let roster = workspace.roster else { throw Failure.noBackend }
         if roster.state.isOnline {
-            return try await body { method, params in try await roster.request(method, params, timeout: .seconds(20)) }
+            return try await body(
+                { method, params in try await roster.request(method, params, timeout: .seconds(20)) },
+                { submit in try await roster.submitPrompt(submit, timeout: .seconds(20)) }
+            )
         }
         let socket = try await makeSocket(workspace)
         defer { Task { await socket.close() } }
-        return try await body { method, params in try await socket.request(method, params, timeout: .seconds(20)) }
+        return try await body(
+            { method, params in try await socket.request(method, params, timeout: .seconds(20)) },
+            { submit in
+                try await socket.request("prompt.submit", submit.params(sessionAuthority: await socket.sessionAuthority), timeout: .seconds(20))
+            }
+        )
     }
 
     /// A one-off connection to the gateway's backend with the saved sign-in (a local backend's
