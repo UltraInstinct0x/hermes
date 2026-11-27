@@ -1474,6 +1474,17 @@ final class BotRoster {
         return try await socket.request("prompt.submit", submit.params(sessionAuthority: await socket.sessionAuthority), timeout: timeout)
     }
 
+    func interruptPrompt(sessionID: String, profile: String?, generation: () async throws -> Int) async throws -> Bool {
+        let socket = try await liveSocket()
+        let target: Int?
+        if await socket.sessionAuthority {
+            target = try await generation()
+        } else {
+            target = nil
+        }
+        return try await socket.interrupt(sessionID: sessionID, profile: profile, generation: target)
+    }
+
     /// The shared socket, once it can carry a request.
     private func liveSocket() async throws -> GatewaySocket {
         #if os(iOS)

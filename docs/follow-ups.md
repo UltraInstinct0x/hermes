@@ -165,20 +165,22 @@ design's component names, used in code comments.
 - **Draining:** when the turn has settled (`session.info {running: false}` over the gateway
   protocol, the run's end over the API server) the first item goes as the next turn. Over the
   gateway protocol it is sent with `prompt.submit {queued: true}`, so Hermes never turns it into a
-  steer. On the session authority it also carries the `submission_id` the message got when it was
-  queued, and a resend after a resume keeps it ([composer.md](composer.md) §2). It appears
+  steer. On the session authority it also carries the Bot profile, the staged photo references
+  (if any), and the `submission_id` the message got when it was queued. A resend after a resume
+  keeps them ([composer.md](composer.md) §2). It appears
   captioned "Sent from the queue" and the rest move up. One at a time: the next item waits for
   that turn to end too. Messages the gateway holds go before the app's queue. A turn whose end the
   app never heard doesn't hold the queue for long: after 10 s the gateway is asked, and the chat
   settles ([chat.md](chat.md) §4b). Behind a turn that can't take a note (finishing, stopping, or
   running elsewhere) Send queues what's typed, and the chip shows Send Next.
 - **Stop:** the trailing Stop interrupts the turn (`session.interrupt`, or
-  `POST /v1/runs/{id}/stop`) and does **not** drain the app's queue. Over the gateway protocol
+  `POST /v1/runs/{id}/stop`) and does **not** drain the app's queue. On the legacy socket
   Hermes also empties its own queue, ends the chat's running helpers and declines the approval the
   turn waited on; background processes keep running. What its queue held comes back first in Up
   Next, Not sent ([chat.md](chat.md) §4c), and a receipt under the turn names the rest ("Stop also
-  stopped 2 helpers and declined the approval Hermes was waiting on.", `StopReceipt`). Over the API
-  server Stop ends only that run: other runs Hermes queued still run. The tray stays, and Send with an
+  stopped 2 helpers and declined the approval Hermes was waiting on.", `StopReceipt`). On the
+  authority socket and API server Stop ends only that turn: other submissions Hermes queued still
+  run. The tray stays, and Send with an
   empty field sends the first item. The next turn that starts resumes draining. A message sent
   with Send while the turn is still stopping goes to Up Next, and the queue drains when it ends.
 - **Survives:** the queue is kept per chat on the device (Application Support, in the app's own

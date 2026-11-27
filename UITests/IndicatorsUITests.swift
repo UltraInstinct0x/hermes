@@ -53,6 +53,16 @@ final class IndicatorsUITests: XCTestCase {
         try await expectMotion(app, sweeps: 0)
     }
 
+    @MainActor
+    func testStopInterruptsASecondaryBotsRunningTurn() async throws {
+        let app = try await launch(["-HERMES_OPEN", "bot:researcher", "-HERMES_SEND_HERE", "marathon on these sources",
+                                    "-HERMES_SEND_HERE_AFTER", "4"])
+        let stop = app.buttons["Stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 60), "the secondary Bot never started")
+        stop.tap()
+        XCTAssertTrue(app.staticTexts["Stopped"].waitForExistence(timeout: 8), "Hermes didn't interrupt the running turn")
+    }
+
     /// Helpers at work: the header's line moves; helper rows count their time, no spinner.
     @MainActor
     func testHelpersCountTheirTime() async throws {

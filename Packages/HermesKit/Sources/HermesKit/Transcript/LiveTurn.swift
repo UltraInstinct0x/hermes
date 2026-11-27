@@ -514,7 +514,8 @@ public struct EventReplay: Sendable, Equatable {
         events = frames.map { frame in
             GatewayEvent(
                 type: frame["type"]?.stringValue ?? "", sessionID: runtime,
-                seq: frame["seq"]?.truncatedIntValue, payload: frame["payload"] ?? .object([:])
+                seq: frame["seq"]?.truncatedIntValue, payload: frame["payload"] ?? .object([:]),
+                executionGeneration: (frame["execution_generation"] ?? frame["payload"]?["execution_generation"])?.truncatedIntValue
             )
         }
         truncated = result["truncated"]?.boolValue ?? false

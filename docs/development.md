@@ -473,7 +473,9 @@ authority does: `gateway.ready` says `session_authority: true`, a `prompt.submit
 admission and never a second turn, every new message's receipt says `queued` (an idle chat's too;
 a steer says `started`), a closed session answers 4001 `not_found`, a `prompt.submit` from a socket
 that didn't create or resume the chat answers 4001 `permission_denied` (checked in that order, then
-the keys; `image.attach_bytes` is refused the same way), and `session.title` answers -32601. A
+the keys; `image.attach_bytes` is refused the same way). Scoped uploads and submits must name the
+Bot's profile, and a photo only reaches an authority prompt if it includes the returned path and
+MIME in `attachments`. `session.title` answers -32601. A
 `command.dispatch` without a session, or with one that is closed or of another profile than the one
 it names, answers 4001 `not_found`, and a command Hermes doesn't have answers 4001
 `unsupported_command` where the legacy dispatcher says 4018. The log prints each admission, each
@@ -483,8 +485,10 @@ command and each refusal, and each `session.list` and `session.create`. Without 
 agent being built; 6 s when the message says "cold start", as on a loaded Mac) and answers `rejected` when idle; while Hermes compacts the chat (a "snapshot"
 message with "compact", or a Bot Chat's "slow … compact", compacts for 8 s after its first step,
 `status.update` kind `compacting`) a steer or redirect is held for the next turn and answered
-`queued`; `session.interrupt` empties the queue held for
-the next turn. A turn stopped while a card waits (an approval, a question, a password) ends as on
+`queued`; on the legacy socket `session.interrupt` empties the queue held for the next turn.
+On the authority socket it takes the execution generation from the turn event or resume response,
+refuses a missing or different generation with 4001 `stale_generation` and leaves the queue intact.
+A turn stopped while a card waits (an approval, a question, a password) ends as on
 Hermes: the card is withdrawn (`request.cancel` with the card's own method, reason `interrupted`)
 and the turn ends `interrupted` with no reply stored. On the API server mock a chat's runs go one at a time: a run posted behind another
 answers `started` but sends nothing and reads `queued` until it runs, `POST /v1/runs/{id}/steer`

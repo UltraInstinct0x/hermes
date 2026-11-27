@@ -7,6 +7,7 @@ import Foundation
 /// taken back (`image.detach`, by path) unless the prompt may have them (`docs/chat.md` §4c).
 public struct StagedImages: Sendable, Equatable {
     public private(set) var paths: [String] = []
+    public private(set) var references: [JSONValue] = []
 
     public init() {}
 
@@ -14,9 +15,17 @@ public struct StagedImages: Sendable, Equatable {
 
     /// Notes what an attach staged: `{path}` for a photo, `{pages: [{path}]}` for a PDF's pages.
     public mutating func staged(_ result: JSONValue) {
-        if let path = result["path"]?.stringValue, !path.isEmpty { paths.append(path) }
+        record(result)
         if case .array(let pages)? = result["pages"] {
-            paths += pages.compactMap { $0["path"]?.stringValue }.filter { !$0.isEmpty }
+            for page in pages { record(page) }
+        }
+    }
+
+    private mutating func record(_ result: JSONValue) {
+        guard let path = result["path"]?.stringValue, !path.isEmpty else { return }
+        paths.append(path)
+        if let mime = result["mime"]?.stringValue {
+            references.append(.object(["path": .string(path), "mime": .string(mime)]))
         }
     }
 

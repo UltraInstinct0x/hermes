@@ -608,6 +608,8 @@ def emit(sid, kind, payload):
         if kind == "message.delta" and runtime.get("inflight"):
             runtime["inflight"]["assistant"] += str(payload.get("text") or "")
         event = {"type": kind, "session_id": sid, "seq": runtime["seq"], "payload": payload}
+        if CONFIG.get("session_authority") and runtime.get("execution_generation") is not None:
+            event["execution_generation"] = runtime["execution_generation"]
         # Like Hermes' replay ring (tui_gateway/event_replay.py): 512 events or 4 MiB a session, oldest out
         # first, and a watermark of the newest one evicted, so a client that missed it hears `truncated`.
         frozen = {"type": kind, "session_id": sid, "payload": payload}
@@ -794,6 +796,7 @@ def start_turn(sid, text, runner):
         runtime["running"] = True
         runtime["interrupt"] = False
         runtime["turn_started"] = time.time()
+        runtime["execution_generation"] = runtime.get("execution_generation", 0) + 1
         # Hermes builds the turn's agent first: half a second here, 6 s for a "cold start" (a loaded
         # Mac), in which only a redirect queues and a steer is refused 4010.
         runtime["agent_build_s"] = 6.0 if "cold start" in text.lower() else 0.5
@@ -872,12 +875,12 @@ def check_redirect(sid):
         raise Redirected(text)
 
 
-def busy_submit(sid, text, queued):
+def busy_submit(sid, text, queued, attachments=None):
     """Hermes' _handle_busy_submit: a client queue drain (`queued: true`) and anything with images is held
     for the next turn; plain text follows display.busy_input_mode (steer, interrupt → redirect, queue)."""
     with LOCK:
         runtime = RUNTIME[sid]
-        images = runtime.pop("attached_images", [])
+        images = runtime.pop("attached_images", []) if attachments is None else attachments
         media = len(images)
         mode = "queue" if queued or media else BUSY["mode"]
         if mode == "steer":
@@ -887,7 +890,7 @@ def busy_submit(sid, text, queued):
             redirect_or_steer(runtime, text)
             return {"status": "redirected"}
         queue = runtime.setdefault("queue", [])
-        if not media and len(queue) == 1 and not queue[0]["media"]:
+        if attachments is None and not media and len(queue) == 1 and not queue[0]["media"]:
             # `_enqueue_prompt`: words join a text-only head while nothing waits behind it, one turn.
             head = queue[0]
             head["text"] = f"{head['text']}\n\n{text}"
@@ -2159,7 +2162,7 @@ LEGACY_SUBMIT_KEYS = {
     "rebind_survivor_row_ids",
 }
 # Methods the authority has no handler for, answered -32601 (session_controls.py@v0.23.4:403).
-AUTHORITY_UNKNOWN = {"session.title"}
+AUTHORITY_UNKNOWN = {"session.title", "image.detach", "pdf.attach"}
 ADMISSIONS = {}  # (stored chat, submission id) -> the receipt it was admitted with
 
 
@@ -2198,7 +2201,7 @@ def install_authority_dispatch():
 def submit_refusal(params):
     """The refusal Hermes gives a `prompt.submit` with keys it doesn't take, or None."""
     if CONFIG.get("session_authority"):
-        problem = set(params) - AUTHORITY_SUBMIT_KEYS
+        problem = set(params) - AUTHORITY_SUBMIT_KEYS - {"profile"}
         request_id = params.get("submission_id") or params.get("input_id")
         if problem or not isinstance(request_id, str) or not request_id:
             return RPCError(4001, "invalid_params", {"reason": "invalid_params"})
@@ -2291,6 +2294,7 @@ def method_session_resume(params):
             raise RPCError(4009, "session disconnect interrupt settling")
         omit = bool(params.get("omit_messages"))
         return {"session_id": sid, "resumed": stored, "message_count": len(session["messages"]),
+                **({"execution_generation": runtime.get("execution_generation", 0)} if CONFIG.get("session_authority") else {}),
                 "messages": [] if omit else session["messages"], "messages_omitted": omit,
                 "info": {"model": PROFILES[profile]["model"], "running": runtime["running"]},
                 **live_turn(runtime), "running": runtime["running"], "session_key": stored,
@@ -2481,6 +2485,16 @@ def method_prompt_submit(params):
     return admit_prompt(params, submit_prompt)
 
 
+def check_authority_scope(params, runtime, *, subscription=True):
+    if not CONFIG.get("session_authority"):
+        return
+    if (params.get("profile") or "default") != runtime["profile"]:
+        reason = "permission_denied" if subscription else "not_found"
+        raise RPCError(4001, reason, {"reason": reason})
+    if subscription and getattr(CURRENT, "peer", None) not in runtime["peers"]:
+        raise RPCError(4001, "permission_denied", {"reason": "permission_denied"})
+
+
 def admit_prompt(params, run):
     """The socket's `prompt.submit` contract around `run(sid, runtime, params)`, for every chat kind."""
     authority = CONFIG.get("session_authority")
@@ -2496,9 +2510,7 @@ def admit_prompt(params, run):
             # gateway/session_controls.py@v0.23.4:899: a socket holds only the chats it created or
             # resumed (`subscriptions`), so a reconnected one holds none until it resumes.
             with LOCK:
-                subscribed = getattr(CURRENT, "peer", None) in runtime["peers"]
-            if not subscribed:
-                raise RPCError(4001, "permission_denied", {"reason": "permission_denied"})
+                check_authority_scope(params, runtime)
             refusal = submit_refusal(params)
             if refusal is not None:
                 raise refusal
@@ -2557,17 +2569,28 @@ def submit_prompt(sid, runtime, params):
             emit(sid, "error", {"message": hold_refusal(runtime["stored"])})
         threading.Thread(target=refuse, daemon=True).start()
         return {"status": "streaming"}
+    attachments = None
+    if CONFIG.get("session_authority"):
+        refs = params.get("attachments", [])
+        staged = runtime.get("authority_images", {})
+        if (not isinstance(refs, list) or ("attachments" in params and not refs)
+                or any(not isinstance(ref, dict) or set(ref) != {"path", "mime"}
+                       or not isinstance(ref["path"], str) or staged.get(ref["path"]) != ref["mime"] for ref in refs)):
+            raise RPCError(4001, "invalid_params", {"reason": "invalid_params"})
+        attachments = [ref["path"] for ref in refs]
     with LOCK:
-        busy = runtime["running"]
-    if busy:
-        return busy_submit(sid, text, bool(params.get("queued")))
+        if runtime["running"]:
+            return busy_submit(sid, text, bool(params.get("queued")), attachments)
     if CONFIG.get("agent_build"):
         # Hermes builds a chat's agent before it takes the prompt (tui_gateway `_announce_built_agent`
         # announces it with session.info, still idle), and on a loaded Mac that takes seconds: the
         # submit is answered, and the turn runs, only after.
         emit(sid, "session.info", {"running": False, "model": PROFILES[runtime["profile"]]["model"]})
         time.sleep(CONFIG["agent_build"])
-    start_turn(sid, text, run_turn)
+    with LOCK:
+        if attachments is not None:
+            runtime["held_images"] = attachments
+        start_turn(sid, text, run_turn)
     return {"status": "streaming"}
 
 
@@ -2576,14 +2599,23 @@ def method_session_interrupt(params):
     whole queue held for the next turn is purged: nothing in it runs."""
     sid, runtime = runtime_for(params)
     with LOCK:
+        authority = CONFIG.get("session_authority")
+        if authority:
+            check_authority_scope(params, runtime, subscription=False)
+            if params.get("execution_generation") != runtime.get("execution_generation", 0):
+                raise RPCError(4001, "stale_generation", {"reason": "stale_generation"})
         runtime["interrupt"] = True
-        runtime["queue"] = []
-        runtime.pop("steers", None)
+        if not authority:
+            runtime["queue"] = []
+            runtime.pop("steers", None)
         cancelled = [rid for rid, e in PENDING.items() if e["sid"] == sid]
     for rid in cancelled:
         # Each open request is withdrawn under its own method (`server_requests.cancel`). An approval gets
         # no `approval.cancelled` here: withdrawing the request already took it off Hermes's queue.
         cancel_request(rid, "interrupted")
+    if authority:
+        return {"ref": {"profile_id": runtime["profile"], "session_id": runtime["stored"]},
+                "execution_generation": params["execution_generation"]}
     return {"status": "interrupted"}
 
 
@@ -2619,12 +2651,15 @@ def method_image_attach_bytes(params):
     prompt leaves them for the next one, until `image.detach` takes them back by path."""
     sid, runtime = runtime_for(params)
     if CONFIG.get("session_authority"):
-        # gateway/session_images.py@v0.23.4 `attach_bytes`: like a submit, only on a chat this
-        # socket created or resumed.
+        filename = params.get("filename") or "image.png"
+        ext = pathlib.Path(filename).suffix.lower()
+        mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "image/png")
+        path = f"/home/user/.hermes/cache/images/upload_{uuid.uuid4().hex[:8]}{ext}"
         with LOCK:
-            subscribed = getattr(CURRENT, "peer", None) in runtime["peers"]
-        if not subscribed:
-            raise RPCError(4001, "permission_denied", {"reason": "permission_denied"})
+            check_authority_scope(params, runtime)
+            runtime.setdefault("authority_images", {})[path] = mime
+        return {"attached": True, "path": path, "mime": mime, "count": 1, "name": pathlib.Path(path).name}
     path = f"/home/user/.hermes/images/upload_{uuid.uuid4().hex[:8]}.png"
     with LOCK:
         runtime.setdefault("attached_images", []).append(path)
@@ -3151,7 +3186,9 @@ class Handler(BaseHTTPRequestHandler):
                 running = [sid for sid, runtime in RUNTIME.items() if runtime["running"] and not runtime.get("dead")
                            and (not profile or runtime["profile"] == profile)]
             for sid in running:
-                method_session_interrupt({"session_id": sid})
+                runtime = RUNTIME[sid]
+                method_session_interrupt({"session_id": sid, "profile": runtime["profile"],
+                                          "execution_generation": runtime.get("execution_generation", 0)})
             deadline = time.time() + float(body.get("seconds") or 15)
             while True:
                 with LOCK:
