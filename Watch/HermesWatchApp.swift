@@ -65,6 +65,16 @@ final class WatchLink: NSObject, WCSessionDelegate {
         }
     }
 
+    func checkRequests(id: UUID) async -> WatchCompanion.Response? {
+        let deadline = ContinuousClock.now + .seconds(45)
+        while !Task.isCancelled && ContinuousClock.now < deadline {
+            let response = await send(.openRequests(id))
+            guard response == .checkingRequests else { return response }
+            try? await Task.sleep(for: .seconds(1))
+        }
+        return .unavailable
+    }
+
     #if DEBUG
     private var fixtureSettled: Set<WatchCompanion.RequestCard.ID> = []
 
@@ -88,6 +98,11 @@ final class WatchLink: NSObject, WCSessionDelegate {
         case .latestReply(let bot):
             return bot == id ? .latestReply("The **backups** finished.") : .unavailable
         case .openRequests:
+            if UserDefaults.standard.bool(forKey: "HERMES_WATCH_SLOW_REQUESTS"),
+               fixtureCheckCount < 3 {
+                fixtureCheckCount += 1
+                return .checkingRequests
+            }
             return .openRequests(fixtureCards.filter { !fixtureSettled.contains($0.id) }, incomplete: false)
         case .answer(let card, let answer):
             guard fixtureCards.contains(card), card.result(for: answer) != nil else { return .answer(.invalidAnswer) }
@@ -95,6 +110,7 @@ final class WatchLink: NSObject, WCSessionDelegate {
             return .answer(answer == .approval(.deny) ? .noLongerPending : .sent)
         }
     }
+    private var fixtureCheckCount = 0
     #endif
 }
 
@@ -176,7 +192,7 @@ private struct WatchBotDetail: View {
                     Button("Refresh") { retry += 1 }
                 case .botNotFound:
                     Text("This Bot is no longer available.")
-                case .unavailable, .roster, .openRequests, .answer:
+                case .unavailable, .roster, .checkingRequests, .openRequests, .answer:
                     Text("The reply isn’t available. Check Hermes on your iPhone.")
                     Button("Retry") { retry += 1 }
                 case nil:
@@ -198,6 +214,7 @@ private struct WatchRequestList: View {
     let phone: WatchLink
     @State private var response: WatchCompanion.Response?
     @State private var retry = 0
+    @State private var previousRead: ReadTrigger?
     @Environment(\.scenePhase) private var phase
 
     var body: some View {
@@ -222,20 +239,33 @@ private struct WatchRequestList: View {
                     .accessibilityIdentifier("watchRequest-\(card.id.requestID)")
                 }
                 Button("Refresh") { retry += 1 }
-            case nil:
+            case nil, .checkingRequests:
                 Text("Checking requests…").foregroundStyle(.secondary)
             default:
-                Text("Open Hermes on your iPhone and try again.").foregroundStyle(.secondary)
+                if phone.reachable {
+                    Text("Couldn’t check requests. Try again.").foregroundStyle(.secondary)
+                } else {
+                    Text("Can’t reach Hermes on your iPhone.").foregroundStyle(.secondary)
+                }
                 Button("Retry") { retry += 1 }
             }
         }
         .navigationTitle("Requests")
-        .task(id: ReadTrigger(reachable: phone.reachable, active: phase == .active, retry: retry,
-                              requestsRevision: phone.requestsRevision)) {
-            guard phase == .active else { return }
-            let result = await phone.send(.openRequests)
+        .task(id: readTrigger) { [trigger = readTrigger] in
+            guard trigger.active else { return }
+            let revision = trigger.requestsRevision
+            let publishedID = previousRead.flatMap {
+                $0.retry == trigger.retry && $0.requestsRevision != revision ? revision.flatMap(UUID.init(uuidString:)) : nil
+            }
+            previousRead = trigger
+            response = nil
+            let result = await phone.checkRequests(id: publishedID ?? UUID())
             if !Task.isCancelled { response = result ?? .unavailable }
         }
+    }
+
+    private var readTrigger: ReadTrigger {
+        ReadTrigger(reachable: phone.reachable, active: phase == .active, retry: retry, requestsRevision: phone.requestsRevision)
     }
 
     private func heading(for card: WatchCompanion.RequestCard) -> String {

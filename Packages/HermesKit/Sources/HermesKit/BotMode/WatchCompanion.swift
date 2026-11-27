@@ -6,7 +6,7 @@ public enum WatchCompanion {
     public enum Request: Codable, Sendable, Equatable {
         case roster
         case latestReply(BotID)
-        case openRequests
+        case openRequests(UUID)
         case answer(RequestCard, RequestAnswer)
     }
 
@@ -15,6 +15,7 @@ public enum WatchCompanion {
         case latestReply(String?)
         case unavailable
         case botNotFound
+        case checkingRequests
         case openRequests([RequestCard], incomplete: Bool)
         case answer(AnswerStatus)
     }

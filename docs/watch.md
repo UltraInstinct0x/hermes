@@ -45,7 +45,12 @@ pick an offered choice (or several when allowed), or use the Watch text field, i
 dictation, when the question accepts words. A multi-question request sends one answer after the
 last question.
 
-The iPhone uses the same owning-session attach as [Needs You](inbox.md). It checks the complete
+The iPhone uses the same request feed and owning-session attach as [Needs You](inbox.md).
+The Watch shows **Checking requests…** while the iPhone reads the ledger and checks each owner.
+If some owners can't be checked, the list still shows the requests it could verify. If a read
+fails while the Watch can reach the iPhone, retry from the Watch; if Hermes is unreachable, bring
+the devices back in range and try again. No requests or answers are queued for later delivery.
+Before sending an answer, the iPhone checks the complete
 `srq-…` ID and the displayed request against the owner's live snapshot before sending the answer.
 Nothing is queued on the Watch. **Answer sent** shows your answer and its Bot or chat. It means
 the iPhone wrote the reply, not that the gateway confirmed it won. **Back to Requests** returns

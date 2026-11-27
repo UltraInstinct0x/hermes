@@ -2,6 +2,94 @@ import Foundation
 import HermesKit
 import Testing
 
+@MainActor @Test func watchCanReadFirstPublishedRequestsWhileQueuedRefreshIsStillRunning() async {
+    let refresh = LedgerRefresh()
+    let first = AsyncStream<Void>.makeStream()
+    let publish = AsyncStream<Void>.makeStream()
+    let second = AsyncStream<Void>.makeStream()
+    let finish = AsyncStream<Void>.makeStream()
+    var requestID: String?
+    var scans = 0
+    let watch = Task {
+        await refresh.waitForNextSnapshot {
+            scans += 1
+            if scans == 1 {
+                first.continuation.finish()
+                var gate = publish.stream.makeAsyncIterator()
+                _ = await gate.next()
+                requestID = "srq-first"
+            } else {
+                second.continuation.finish()
+                var gate = finish.stream.makeAsyncIterator()
+                _ = await gate.next()
+                requestID = "srq-second"
+            }
+            return true
+        }
+        return requestID
+    }
+
+    var started = first.stream.makeAsyncIterator()
+    _ = await started.next()
+    await refresh.refresh {
+        Issue.record("The overlapping refresh should queue a pass, not start another scan")
+        return true
+    }
+    publish.continuation.finish()
+    var queued = second.stream.makeAsyncIterator()
+    _ = await queued.next()
+
+    let timeout = Task {
+        do { try await Task.sleep(for: .seconds(3)) } catch { return }
+        finish.continuation.finish()
+    }
+    #expect(await watch.value == "srq-first")
+
+    let nextReadStarted = AsyncStream<Void>.makeStream()
+    let nextWatch = Task {
+        nextReadStarted.continuation.finish()
+        await refresh.waitForNextSnapshot {
+            Issue.record("The Watch should join the active scan")
+            return true
+        }
+        return requestID
+    }
+    var nextRead = nextReadStarted.stream.makeAsyncIterator()
+    _ = await nextRead.next()
+    finish.continuation.finish()
+    #expect(await nextWatch.value == "srq-second")
+    timeout.cancel()
+}
+
+@Test func legacyRequestScanKeepsApprovalsWhenOtherSessionsCannotBeRead() async throws {
+    let source = LedgerSource.ID(gatewayID: "box", profileID: "writer")
+    let scan = try await RequestLedgerClient.scanLegacyRequests(source: source) { method, params in
+        #expect(params["profile"] == .string("writer"))
+        if method == "session.list" {
+            return .object(["sessions": .array([
+                .object(["id": .string("broken")]),
+                .object(["id": .string("stale"), "resolved_id": .string("owner")]),
+            ])])
+        }
+        if params["session_id"] == .string("broken") { throw URLError(.timedOut) }
+        #expect(method == "session.resume")
+        #expect(params["session_id"] == .string("owner"))
+        return .object(["open_requests": .array([
+            .object(["id": .string("srq-exact"), "method": .string("approval"), "params": .object([:])]),
+        ])])
+    }
+    #expect(scan.failure == .offline)
+    #expect(scan.rows.map(\.requestID) == ["srq-exact"])
+    #expect(scan.rows.first?.sessionID == "owner")
+}
+
+@Test func watchRequestCheckWireRoundTrips() throws {
+    let request = WatchCompanion.Request.openRequests(UUID())
+    let pending = WatchCompanion.Response.checkingRequests
+    #expect(try JSONDecoder().decode(WatchCompanion.Request.self, from: JSONEncoder().encode(request)) == request)
+    #expect(try JSONDecoder().decode(WatchCompanion.Response.self, from: JSONEncoder().encode(pending)) == pending)
+}
+
 @Test func watchRoutesDropRemovedGatewayBeforeAndAfterAnInFlightRefresh() throws {
     let removed = UUID()
     let kept = UUID()

@@ -60,100 +60,114 @@ final class NeedsYouFeed {
     @ObservationIgnored private var cursors: [UUID: Cursor] = [:]
     @ObservationIgnored private var boxWorkspaces: Set<UUID> = []
     @ObservationIgnored private var boxLiveSources: [UUID: Set<LedgerSource.ID>] = [:]
-    @ObservationIgnored private var refreshing = false
-    @ObservationIgnored private var needsRefresh = false
+    @ObservationIgnored private let ledgerRefresh = LedgerRefresh()
+    @ObservationIgnored private var incompleteLegacySources: Set<LedgerSource.ID> = []
+    #if os(iOS)
+    @ObservationIgnored var watchRequestsDidChange: (() -> Void)?
+    @ObservationIgnored private var watchRequestsRevision = 0
+    #endif
 
     func refresh(_ workspaces: [BotWorkspace]) async {
-        guard !refreshing else { needsRefresh = true; return }
-        refreshing = true
-        defer { refreshing = false }
-        repeat {
-            needsRefresh = false
-            var routing = LedgerRouteCache<Route>()
-            var boxes: Set<UUID> = []
-            var liveBoxSources: [UUID: Set<LedgerSource.ID>] = [:]
-            var snapshots: [LedgerSnapshot] = []
-            for workspace in workspaces {
-                guard let roster = workspace.roster, !Task.isCancelled else { continue }
-                let backend = roster.backendClient
-                var coverage: [LedgerSource] = []
-                do {
-                    if let box = try await backend.federatedLedger() {
-                        snapshots.append(box)
-                        boxes.insert(workspace.id)
-                        liveBoxSources[workspace.id] = Set((box.sources ?? []).filter { $0.state == .live }.map(\.id))
-                        for row in box.open {
-                            if let alias = row.gatewayID { routing.set(.box(backend, alias), for: row.id, gateway: workspace.id) }
-                        }
-                        for source in box.sources ?? [] where source.state == .unsupported {
-                            guard let profile = source.profileID else { continue }
-                            let route = Route.box(backend, source.gatewayID)
-                            if let rows = try? await Self.legacyRows(source.id, profile: profile, route: route) {
-                                snapshots.append(.init(open: rows, recent: [], openCount: rows.count, sources: nil))
-                                for row in rows where routing[row.id] == nil { routing.set(route, for: row.id, gateway: workspace.id) }
+        await ledgerRefresh.refresh { await refreshSnapshot(workspaces) }
+    }
+
+    private func refreshSnapshot(_ workspaces: [BotWorkspace]) async -> Bool {
+        var routing = LedgerRouteCache<Route>()
+        var boxes: Set<UUID> = []
+        var liveBoxSources: [UUID: Set<LedgerSource.ID>] = [:]
+        var incomplete: Set<LedgerSource.ID> = []
+        var snapshots: [LedgerSnapshot] = []
+        for workspace in workspaces {
+            guard let roster = workspace.roster, !Task.isCancelled else { continue }
+            let backend = roster.backendClient
+            var coverage: [LedgerSource] = []
+            do {
+                if let box = try await backend.federatedLedger() {
+                    snapshots.append(box)
+                    boxes.insert(workspace.id)
+                    liveBoxSources[workspace.id] = Set((box.sources ?? []).filter { $0.state == .live }.map(\.id))
+                    for row in box.open {
+                        if let alias = row.gatewayID { routing.set(.box(backend, alias), for: row.id, gateway: workspace.id) }
+                    }
+                    for source in box.sources ?? [] where source.state == .unsupported {
+                        guard source.profileID != nil else { continue }
+                        let route = Route.box(backend, source.gatewayID)
+                        do {
+                            let scan = try await Self.scanLegacyRequests(source.id, route: route)
+                            snapshots.append(.init(open: scan.rows, recent: [], openCount: scan.rows.count, sources: nil))
+                            for row in scan.rows where routing[row.id] == nil {
+                                routing.set(route, for: row.id, gateway: workspace.id)
                             }
+                            if scan.failure != nil { incomplete.insert(source.id) }
+                        } catch {
+                            incomplete.insert(source.id)
                         }
-                        continue
                     }
+                    continue
+                }
+            } catch {
+                coverage = [LedgerSource(id: .init(gatewayID: workspace.id.uuidString, profileID: nil),
+                                         state: RequestLedgerClient.state(of: error))]
+                snapshots.append(LedgerSnapshot(open: [], recent: [], openCount: 0, sources: coverage))
+            }
+            let profiles = roster.profiles.map(\.name)
+            var open: [LedgerRow] = []
+            let route = Route.direct(roster)
+            for profile in profiles.isEmpty ? ["default"] : profiles {
+                let source = LedgerSource.ID(gatewayID: workspace.id.uuidString, profileID: profile)
+                do {
+                    let scan = try await Self.scanLegacyRequests(source, route: route)
+                    for row in scan.rows where routing[row.id] == nil { routing.set(route, for: row.id, gateway: workspace.id) }
+                    open += scan.rows
+                    coverage.append(.init(id: source, state: scan.failure ?? .unsupported))
                 } catch {
-                    coverage = [LedgerSource(id: .init(gatewayID: workspace.id.uuidString, profileID: nil),
-                                             state: RequestLedgerClient.state(of: error))]
-                    snapshots.append(LedgerSnapshot(open: [], recent: [], openCount: 0, sources: coverage))
+                    coverage.append(.init(id: source, state: RequestLedgerClient.state(of: error)))
                 }
-                let profiles = roster.profiles.map(\.name)
-                var open: [LedgerRow] = []
-                let route = Route.direct(roster)
-                for profile in profiles.isEmpty ? ["default"] : profiles {
-                    let source = LedgerSource.ID(gatewayID: workspace.id.uuidString, profileID: profile)
-                    do {
-                        let rows = try await Self.legacyRows(source, profile: profile, route: route)
-                        for row in rows where routing[row.id] == nil { routing.set(route, for: row.id, gateway: workspace.id) }
-                        open += rows
-                        coverage.append(.init(id: source, state: .unsupported))
-                    } catch {
-                        coverage.append(.init(id: source, state: RequestLedgerClient.state(of: error)))
-                    }
-                }
-                snapshots.append(.init(open: open, recent: [], openCount: open.count, sources: coverage))
-                workspace.ledgerSources = coverage
             }
-            guard !Task.isCancelled else { return }
-            let merged = LedgerSnapshot.merge(snapshots)
-            snapshot = merged
-            for workspace in workspaces where boxes.contains(workspace.id) {
-                workspace.ledgerSources = merged.sources ?? []
-            }
-            routes.replace(with: routing)
-            lookupRetries = lookupRetries.filter { routing[$0.key] != nil }
-            for id in failedLookups where routing[id] != nil && requestNames[id] == nil {
-                lookupRetries[id, default: 0] += 1
-            }
-            failedLookups.removeAll()
-            for (workspaceID, live) in liveBoxSources where !live.isSubset(of: boxLiveSources[workspaceID] ?? []) {
-                cursors.removeValue(forKey: workspaceID)
-            }
-            boxWorkspaces = boxes
-            boxLiveSources = liveBoxSources
-            updateMoreHistory(workspaces)
-        } while needsRefresh && !Task.isCancelled
+            snapshots.append(.init(open: open, recent: [], openCount: open.count, sources: coverage))
+            workspace.ledgerSources = coverage
+        }
+        guard !Task.isCancelled else { return false }
+        let merged = LedgerSnapshot.merge(snapshots)
+        #if os(iOS)
+        let watchRequestsChanged = snapshot?.open != merged.open || snapshot?.sources != merged.sources
+            || incompleteLegacySources != incomplete
+        #endif
+        incompleteLegacySources = incomplete
+        snapshot = merged
+        for workspace in workspaces where boxes.contains(workspace.id) {
+            workspace.ledgerSources = merged.sources ?? []
+        }
+        routes.replace(with: routing)
+        lookupRetries = lookupRetries.filter { routing[$0.key] != nil }
+        for id in failedLookups where routing[id] != nil && requestNames[id] == nil {
+            lookupRetries[id, default: 0] += 1
+        }
+        failedLookups.removeAll()
+        for (workspaceID, live) in liveBoxSources where !live.isSubset(of: boxLiveSources[workspaceID] ?? []) {
+            cursors.removeValue(forKey: workspaceID)
+        }
+        boxWorkspaces = boxes
+        boxLiveSources = liveBoxSources
+        updateMoreHistory(workspaces)
+        #if os(iOS)
+        if watchRequestsChanged {
+            watchRequestsRevision += 1
+            watchRequestsDidChange?()
+        }
+        #endif
+        return true
     }
 
     func forgetGateway(_ id: UUID) {
         routes.remove(gateway: id)
     }
 
-    private static func legacyRows(_ id: LedgerSource.ID, profile: String, route: Route) async throws -> [LedgerRow] {
+    private static func scanLegacyRequests(
+        _ id: LedgerSource.ID, route: Route
+    ) async throws -> (rows: [LedgerRow], failure: LedgerSource.State?) {
         try await Self.withRoute(route) { request in
-            let listing = try await request("session.list", [
-                "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
-            ])
-            var rows: [LedgerRow] = []
-            for session in listing["sessions"]?.arrayValue ?? [] {
-                guard let key = session["resolved_id"]?.stringValue ?? session["id"]?.stringValue else { continue }
-                let snapshot = try await request("session.resume", Self.resume(key, profile: profile))
-                rows += RequestLedgerClient.legacyRows(snapshot: snapshot, sessionID: key, source: id)
-            }
-            return rows
+            try await RequestLedgerClient.scanLegacyRequests(source: id, request: request)
         }
     }
 
@@ -223,14 +237,25 @@ final class NeedsYouFeed {
     }
 
     #if os(iOS)
-    func watchRequests(_ workspaces: [BotWorkspace]) async -> WatchCompanion.Response {
-        await refresh(workspaces)
-        guard let snapshot else { return .unavailable }
+    func watchRequests(_ workspaces: [BotWorkspace], usePublished: Bool) async -> WatchCompanion.Response {
+        if !usePublished || snapshot == nil {
+            await ledgerRefresh.waitForNextSnapshot { await self.refreshSnapshot(workspaces) }
+        }
+        while !Task.isCancelled, let snapshot {
+            let revision = watchRequestsRevision
+            let result = await watchCards(snapshot, workspaces: workspaces)
+            if revision == watchRequestsRevision { return result }
+        }
+        return .unavailable
+    }
+
+    private func watchCards(_ snapshot: LedgerSnapshot, workspaces: [BotWorkspace]) async -> WatchCompanion.Response {
         var cards: [WatchCompanion.RequestCard] = []
-        var incomplete = workspaces.contains { $0.roster == nil } || (snapshot.sources ?? []).contains {
+        var incomplete = !incompleteLegacySources.isEmpty || workspaces.contains { $0.roster == nil } || (snapshot.sources ?? []).contains {
             $0.state != .live && $0.state != .unsupported
         }
         for row in snapshot.open where row.kind == "approval" || row.kind == "clarify" {
+            guard !Task.isCancelled else { return .unavailable }
             guard let session = row.sessionID, !session.isEmpty, let route = routes[row.id],
                   let gateway = routes.gateway(for: row.id) else {
                 incomplete = true

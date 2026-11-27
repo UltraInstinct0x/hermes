@@ -451,7 +451,7 @@ final class AppModel {
         try store.save(updated)
         needsYou.forgetGateway(botID)
         #if os(iOS)
-        watchRelay.forgetGateway(botID)
+        watchRelay.gatewayRemoved()
         #endif
         try? store.removeAPIKey(for: botID)
         try? store.setBackendCredential(nil, for: botID)

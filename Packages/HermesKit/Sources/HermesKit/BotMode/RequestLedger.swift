@@ -89,6 +89,58 @@ public struct LedgerRouteCache<Route> {
     }
 }
 
+@MainActor
+public final class LedgerRefresh {
+    private var refreshing = false
+    private var needsRefresh = false
+    private var waiters: [CheckedContinuation<Bool, Never>] = []
+
+    public init() {}
+
+    public func refresh(_ scan: @MainActor () async -> Bool) async {
+        guard !Task.isCancelled else { return }
+        guard !refreshing else { needsRefresh = true; return }
+        refreshing = true
+        await run(scan)
+    }
+
+    public func waitForNextSnapshot(_ scan: @escaping @MainActor () async -> Bool) async {
+        while !Task.isCancelled {
+            let task: Task<Void, Never>?
+            if refreshing {
+                task = nil
+            } else {
+                refreshing = true
+                task = Task { await run(scan) }
+            }
+            let published = await withTaskCancellationHandler {
+                await withCheckedContinuation { waiters.append($0) }
+            } onCancel: {
+                task?.cancel()
+            }
+            if published { return }
+        }
+    }
+
+    private func run(_ scan: @MainActor () async -> Bool) async {
+        defer {
+            refreshing = false
+            resumeWaiters(published: false)
+        }
+        repeat {
+            needsRefresh = false
+            guard !Task.isCancelled, await scan() else { return }
+            resumeWaiters(published: true)
+        } while needsRefresh
+    }
+
+    private func resumeWaiters(published: Bool) {
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending { waiter.resume(returning: published) }
+    }
+}
+
 public struct LedgerSource: Decodable, Sendable, Equatable, Identifiable {
     public enum State: String, Decodable, Sendable {
         case live, unsupported, offline, notAuthorized = "not_authorized", error
@@ -315,6 +367,32 @@ public struct RequestLedgerClient: Sendable {
              BackendClient.Failure.http(502...504, _), is URLError: .offline
         default: .error
         }
+    }
+
+    public static func scanLegacyRequests(
+        source: LedgerSource.ID, request: Transport
+    ) async throws -> (rows: [LedgerRow], failure: LedgerSource.State?) {
+        guard let profile = source.profileID else { return ([], nil) }
+        let listing = try await request("session.list", [
+            "profile": .string(profile), "limit": .number(200), "include_hidden": .bool(true),
+        ])
+        var rows: [LedgerRow] = []
+        var failure: LedgerSource.State?
+        for session in listing["sessions"]?.arrayValue ?? [] {
+            try Task.checkCancellation()
+            guard let key = session["resolved_id"]?.stringValue ?? session["id"]?.stringValue else { continue }
+            do {
+                let snapshot = try await request("session.resume", [
+                    "session_id": .string(key), "profile": .string(profile), "omit_messages": .bool(true),
+                ])
+                rows += legacyRows(snapshot: snapshot, sessionID: key, source: source)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                if failure == nil { failure = state(of: error) }
+            }
+        }
+        return (rows, failure)
     }
 
     public static func legacyRows(snapshot: JSONValue, sessionID: String, source: LedgerSource.ID) -> [LedgerRow] {

@@ -1,23 +1,36 @@
 #if os(iOS)
 import Foundation
 import HermesKit
+import UIKit
 import WatchConnectivity
 
 final class WatchPhoneRelay: NSObject, WCSessionDelegate {
     private weak var model: AppModel?
-    private let requests = NeedsYouFeed()
+    private var requestCheckID: UUID?
+    private var requestCheck: Task<Void, Never>?
+    private var requestResult: WatchCompanion.Response?
+    private var requestBackgroundTime = UIBackgroundTaskIdentifier.invalid
+    private var publishedRevision: UUID?
 
     func start(model: AppModel) {
         guard WCSession.isSupported() else { return }
         self.model = model
+        model.needsYou.watchRequestsDidChange = { [weak self] in self?.notifyRequestsChanged(published: true) }
         WCSession.default.delegate = self
         WCSession.default.activate()
     }
 
-    func forgetGateway(_ id: UUID) {
-        requests.forgetGateway(id)
+    func gatewayRemoved() {
+        finishRequestCheck(nil)
+        requestCheckID = nil
+        notifyRequestsChanged(published: false)
+    }
+
+    private func notifyRequestsChanged(published: Bool) {
+        let revision = UUID()
+        publishedRevision = published ? revision : nil
         guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
-        try? WCSession.default.updateApplicationContext(["requestsRevision": UUID().uuidString])
+        try? WCSession.default.updateApplicationContext(["requestsRevision": revision.uuidString])
     }
 
     nonisolated func session(
@@ -47,10 +60,10 @@ final class WatchPhoneRelay: NSObject, WCSessionDelegate {
     private func respond(to request: WatchCompanion.Request) async -> WatchCompanion.Response {
         guard let model else { return .unavailable }
         switch request {
-        case .openRequests:
-            return await requests.watchRequests(model.bots.compactMap { model.workspaces[$0.id] })
+        case .openRequests(let id):
+            return checkRequests(id, model: model)
         case .answer(let card, let answer):
-            return .answer(await requests.answerFromWatch(card, answer: answer))
+            return .answer(await model.needsYou.answerFromWatch(card, answer: answer))
         case .roster:
             var bots: [WatchCompanion.Bot] = []
             var hasUnavailableGateway = false
@@ -94,6 +107,37 @@ final class WatchPhoneRelay: NSObject, WCSessionDelegate {
                 return .unavailable
             }
         }
+    }
+
+    private func checkRequests(_ id: UUID, model: AppModel) -> WatchCompanion.Response {
+        if requestCheckID == id {
+            return requestResult ?? .checkingRequests
+        }
+        requestCheckID = id
+        requestResult = nil
+        if requestCheck == nil {
+            let usePublished = id == publishedRevision
+            requestBackgroundTime = UIApplication.shared.beginBackgroundTask(withName: "Watch Requests") { [weak self] in
+                self?.finishRequestCheck(.unavailable)
+            }
+            requestCheck = Task { [weak self, weak model] in
+                guard let model else { return }
+                let workspaces = model.bots.compactMap { model.workspaces[$0.id] }
+                let result = await model.needsYou.watchRequests(workspaces, usePublished: usePublished)
+                guard !Task.isCancelled, let self else { return }
+                finishRequestCheck(result)
+            }
+        }
+        return .checkingRequests
+    }
+
+    private func finishRequestCheck(_ result: WatchCompanion.Response?) {
+        requestCheck?.cancel()
+        requestCheck = nil
+        requestResult = result
+        guard requestBackgroundTime != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(requestBackgroundTime)
+        requestBackgroundTime = .invalid
     }
 }
 #endif
