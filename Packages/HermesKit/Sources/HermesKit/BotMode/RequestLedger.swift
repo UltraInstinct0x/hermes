@@ -104,9 +104,8 @@ public final class LedgerRefresh {
         await run(scan)
     }
 
-    public func waitForSnapshot(hasSnapshot: Bool, scan: @escaping @MainActor () async -> Bool) async {
+    public func waitForNextSnapshot(_ scan: @escaping @MainActor () async -> Bool) async {
         while !Task.isCancelled {
-            if refreshing && hasSnapshot { return }
             let task: Task<Void, Never>?
             if refreshing {
                 task = nil

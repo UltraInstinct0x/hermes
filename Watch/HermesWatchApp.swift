@@ -65,8 +65,7 @@ final class WatchLink: NSObject, WCSessionDelegate {
         }
     }
 
-    func checkRequests() async -> WatchCompanion.Response? {
-        let id = UUID()
+    func checkRequests(id: UUID) async -> WatchCompanion.Response? {
         let deadline = ContinuousClock.now + .seconds(45)
         while !Task.isCancelled && ContinuousClock.now < deadline {
             let response = await send(.openRequests(id))
@@ -215,6 +214,7 @@ private struct WatchRequestList: View {
     let phone: WatchLink
     @State private var response: WatchCompanion.Response?
     @State private var retry = 0
+    @State private var previousRead: ReadTrigger?
     @Environment(\.scenePhase) private var phase
 
     var body: some View {
@@ -251,13 +251,21 @@ private struct WatchRequestList: View {
             }
         }
         .navigationTitle("Requests")
-        .task(id: ReadTrigger(reachable: phone.reachable, active: phase == .active, retry: retry,
-                              requestsRevision: phone.requestsRevision)) {
-            guard phase == .active else { return }
+        .task(id: readTrigger) { [trigger = readTrigger] in
+            guard trigger.active else { return }
+            let revision = trigger.requestsRevision
+            let publishedID = previousRead.flatMap {
+                $0.retry == trigger.retry && $0.requestsRevision != revision ? revision.flatMap(UUID.init(uuidString:)) : nil
+            }
+            previousRead = trigger
             response = nil
-            let result = await phone.checkRequests()
+            let result = await phone.checkRequests(id: publishedID ?? UUID())
             if !Task.isCancelled { response = result ?? .unavailable }
         }
+    }
+
+    private var readTrigger: ReadTrigger {
+        ReadTrigger(reachable: phone.reachable, active: phase == .active, retry: retry, requestsRevision: phone.requestsRevision)
     }
 
     private func heading(for card: WatchCompanion.RequestCard) -> String {

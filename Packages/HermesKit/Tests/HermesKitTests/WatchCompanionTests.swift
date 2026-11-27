@@ -11,7 +11,7 @@ import Testing
     var requestID: String?
     var scans = 0
     let watch = Task {
-        await refresh.waitForSnapshot(hasSnapshot: false) {
+        await refresh.waitForNextSnapshot {
             scans += 1
             if scans == 1 {
                 first.continuation.finish()
@@ -44,13 +44,21 @@ import Testing
         finish.continuation.finish()
     }
     #expect(await watch.value == "srq-first")
-    await refresh.waitForSnapshot(hasSnapshot: requestID != nil) {
-        Issue.record("The Watch should reuse a completed snapshot during the queued pass")
-        return true
+
+    let nextReadStarted = AsyncStream<Void>.makeStream()
+    let nextWatch = Task {
+        nextReadStarted.continuation.finish()
+        await refresh.waitForNextSnapshot {
+            Issue.record("The Watch should join the active scan")
+            return true
+        }
+        return requestID
     }
-    #expect(requestID == "srq-first")
-    timeout.cancel()
+    var nextRead = nextReadStarted.stream.makeAsyncIterator()
+    _ = await nextRead.next()
     finish.continuation.finish()
+    #expect(await nextWatch.value == "srq-second")
+    timeout.cancel()
 }
 
 @Test func legacyRequestScanKeepsApprovalsWhenOtherSessionsCannotBeRead() async throws {

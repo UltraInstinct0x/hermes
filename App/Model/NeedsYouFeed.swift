@@ -62,6 +62,10 @@ final class NeedsYouFeed {
     @ObservationIgnored private var boxLiveSources: [UUID: Set<LedgerSource.ID>] = [:]
     @ObservationIgnored private let ledgerRefresh = LedgerRefresh()
     @ObservationIgnored private var incompleteLegacySources: Set<LedgerSource.ID> = []
+    #if os(iOS)
+    @ObservationIgnored var watchRequestsDidChange: (() -> Void)?
+    @ObservationIgnored private var watchRequestsRevision = 0
+    #endif
 
     func refresh(_ workspaces: [BotWorkspace]) async {
         await ledgerRefresh.refresh { await refreshSnapshot(workspaces) }
@@ -125,6 +129,10 @@ final class NeedsYouFeed {
         }
         guard !Task.isCancelled else { return false }
         let merged = LedgerSnapshot.merge(snapshots)
+        #if os(iOS)
+        let watchRequestsChanged = snapshot?.open != merged.open || snapshot?.sources != merged.sources
+            || incompleteLegacySources != incomplete
+        #endif
         incompleteLegacySources = incomplete
         snapshot = merged
         for workspace in workspaces where boxes.contains(workspace.id) {
@@ -142,6 +150,12 @@ final class NeedsYouFeed {
         boxWorkspaces = boxes
         boxLiveSources = liveBoxSources
         updateMoreHistory(workspaces)
+        #if os(iOS)
+        if watchRequestsChanged {
+            watchRequestsRevision += 1
+            watchRequestsDidChange?()
+        }
+        #endif
         return true
     }
 
@@ -223,9 +237,19 @@ final class NeedsYouFeed {
     }
 
     #if os(iOS)
-    func watchRequests(_ workspaces: [BotWorkspace]) async -> WatchCompanion.Response {
-        await ledgerRefresh.waitForSnapshot(hasSnapshot: snapshot != nil) { await self.refreshSnapshot(workspaces) }
-        guard !Task.isCancelled, let snapshot else { return .unavailable }
+    func watchRequests(_ workspaces: [BotWorkspace], usePublished: Bool) async -> WatchCompanion.Response {
+        if !usePublished || snapshot == nil {
+            await ledgerRefresh.waitForNextSnapshot { await self.refreshSnapshot(workspaces) }
+        }
+        while !Task.isCancelled, let snapshot {
+            let revision = watchRequestsRevision
+            let result = await watchCards(snapshot, workspaces: workspaces)
+            if revision == watchRequestsRevision { return result }
+        }
+        return .unavailable
+    }
+
+    private func watchCards(_ snapshot: LedgerSnapshot, workspaces: [BotWorkspace]) async -> WatchCompanion.Response {
         var cards: [WatchCompanion.RequestCard] = []
         var incomplete = !incompleteLegacySources.isEmpty || workspaces.contains { $0.roster == nil } || (snapshot.sources ?? []).contains {
             $0.state != .live && $0.state != .unsupported

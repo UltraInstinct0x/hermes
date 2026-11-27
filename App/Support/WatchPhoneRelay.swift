@@ -10,10 +10,12 @@ final class WatchPhoneRelay: NSObject, WCSessionDelegate {
     private var requestCheck: Task<Void, Never>?
     private var requestResult: WatchCompanion.Response?
     private var requestBackgroundTime = UIBackgroundTaskIdentifier.invalid
+    private var publishedRevision: UUID?
 
     func start(model: AppModel) {
         guard WCSession.isSupported() else { return }
         self.model = model
+        model.needsYou.watchRequestsDidChange = { [weak self] in self?.notifyRequestsChanged(published: true) }
         WCSession.default.delegate = self
         WCSession.default.activate()
     }
@@ -21,8 +23,14 @@ final class WatchPhoneRelay: NSObject, WCSessionDelegate {
     func gatewayRemoved() {
         finishRequestCheck(nil)
         requestCheckID = nil
+        notifyRequestsChanged(published: false)
+    }
+
+    private func notifyRequestsChanged(published: Bool) {
+        let revision = UUID()
+        publishedRevision = published ? revision : nil
         guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
-        try? WCSession.default.updateApplicationContext(["requestsRevision": UUID().uuidString])
+        try? WCSession.default.updateApplicationContext(["requestsRevision": revision.uuidString])
     }
 
     nonisolated func session(
@@ -108,13 +116,14 @@ final class WatchPhoneRelay: NSObject, WCSessionDelegate {
         requestCheckID = id
         requestResult = nil
         if requestCheck == nil {
+            let usePublished = id == publishedRevision
             requestBackgroundTime = UIApplication.shared.beginBackgroundTask(withName: "Watch Requests") { [weak self] in
                 self?.finishRequestCheck(.unavailable)
             }
             requestCheck = Task { [weak self, weak model] in
                 guard let model else { return }
                 let workspaces = model.bots.compactMap { model.workspaces[$0.id] }
-                let result = await model.needsYou.watchRequests(workspaces)
+                let result = await model.needsYou.watchRequests(workspaces, usePublished: usePublished)
                 guard !Task.isCancelled, let self else { return }
                 finishRequestCheck(result)
             }
