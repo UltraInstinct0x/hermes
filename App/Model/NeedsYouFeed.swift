@@ -337,8 +337,8 @@ final class NeedsYouFeed {
                     method = "approval.respond"
                 case .clarification(let answer, _):
                     guard row.kind == "clarify", prompt["question"]?.stringValue == shown,
-                          !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                          acceptsTypedAnswer || (prompt["multi_select"]?.boolValue == false
+                          acceptsTypedAnswer || (!answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            && prompt["multi_select"]?.boolValue == false
                             && prompt["choices"]?.arrayValue?.contains(.string(answer)) == true) else { return .noLongerWaiting }
                     params["answer"] = .string(answer)
                     method = "clarify.respond"

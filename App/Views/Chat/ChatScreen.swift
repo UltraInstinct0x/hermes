@@ -363,10 +363,6 @@ struct ChatScreen: View {
         } else if let card = conversation.ledgerClarification {
             let request = HermesRequest(id: card.reference.requestId, method: "clarify", kind: .clarify([card.question]))
             ClarifyCard(request: request, questions: [card.question], conversation: conversation) { answer in
-                if answer.isEmpty {
-                    conversation.ledgerClarification = nil
-                    return
-                }
                 Task {
                     let outcome = await app.needsYou.answerNativeRequest(card.reference, selection: .clarification(answer),
                                                                         shown: card.question.question, acceptsTypedAnswer: true)

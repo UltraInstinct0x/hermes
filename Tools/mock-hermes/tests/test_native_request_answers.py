@@ -48,3 +48,14 @@ class NativeRequestAnswers(MockCase):
         extra = self.rpc(chat, "clarify.respond", dict(params, question_id="other"))
         self.assertEqual(extra["error"]["data"]["reason"], "invalid_params")
         self.assertEqual(self.rpc(chat, "clarify.respond", params)["result"]["status"], "resolved")
+
+    def test_empty_native_clarify_answer_settles_the_skipped_question(self):
+        chat, runtime, session = self.open_chat()
+        self.assertIn("result", self.submit(chat, runtime, "native clarify", submission_id="skip-clarify"))
+        prompt = self.until_event(chat, "clarify.request")
+        self.rpc(chat, "session.resume", {"session_id": session})
+        params = dict(session_id=session, execution_generation=prompt["execution_generation"],
+                      prompt_id=prompt["prompt_id"], answer="")
+        self.assertEqual(self.rpc(chat, "clarify.respond", params)["result"],
+                         {"status": "resolved", "prompt_id": prompt["prompt_id"]})
+        self.assertEqual(self.rpc(chat, "session.resume", {"session_id": session})["result"]["prompts"], [])
