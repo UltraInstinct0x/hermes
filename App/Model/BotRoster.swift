@@ -1569,6 +1569,21 @@ final class BotRoster {
     /// Connected, or paused and coming back with the app (`isPaused`).
     var isConnected: Bool { (socket != nil || isPaused) && state.isOnline }
 
+    #if os(iOS)
+    func prepareForWatchRead() async -> Bool {
+        if isPaused || (isInBackground && socket != nil) {
+            // Unlike the phone UI, the Watch needs a fresh roster, not the state kept across a pause.
+            // A request brings back a paused socket and verifies a backgrounded one.
+            guard let result = try? await request("profiles.list", timeout: .seconds(3)),
+                  socket != nil, case .array(let rows)? = result["profiles"] else { return false }
+            apply(rows.map(BotProfile.init(json:)).filter { !$0.name.isEmpty })
+        } else if socket == nil {
+            connectIfNeeded(quietly: true)
+        }
+        return socket != nil && state.isOnline && hasLiveList
+    }
+    #endif
+
     // MARK: - Polling
 
     private func startPolling() {

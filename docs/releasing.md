@@ -15,8 +15,9 @@ is no one-platform release: `release.sh` refuses `--ios-only` and `--mac-only`, 
 no platform choice. If one leg fails (an upload, notarization, the appcast), the release reports it.
 Fix the cause and release both again under a new build number, never one platform alone.
 
-- **iPhone and iPad → TestFlight.** The app and its three extensions are signed with the studio's
-  Apple Distribution identity and App Store profiles, validated and uploaded. The app's profile is
+- **iPhone and iPad → TestFlight.** The app, its three extensions and its Watch companion are signed
+  with the studio's Apple Distribution identity and App Store profiles, validated and uploaded.
+  The companion uses the `Hermes Watch App Store` profile (see [Apple Watch](watch.md) §2). The app's profile is
   "Hermes App Store iCloud": it carries the iCloud key-value entitlement that keeps plugins hidden
   from Suggested in sync (docs/plugins.md §9.3). Internal testers get every build automatically, and
   every build goes to the public beta too (§Public TestFlight below).

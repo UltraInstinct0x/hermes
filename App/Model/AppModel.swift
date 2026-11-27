@@ -31,6 +31,9 @@ final class AppModel {
     /// Removed gateways' web data, deleted at launch once no web view can use it.
     @ObservationIgnored private let retiredWebStores = RetiredWebStores()
     @ObservationIgnored private var webStoreSweep: Task<Void, Never>?
+    #if os(iOS)
+    @ObservationIgnored private let watchRelay = WatchPhoneRelay()
+    #endif
 
     init(store: BotStore = .standard(identities: AppModel.certificateStore)) {
         self.store = store
@@ -70,6 +73,7 @@ final class AppModel {
         watchActivation()
         #else
         watchProtectedData()
+        watchRelay.start(model: self)
         #endif
     }
 
