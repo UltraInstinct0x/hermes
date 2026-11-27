@@ -342,6 +342,7 @@
 		E5D2600DF0831D8B85562670 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C8303AA6ACBA04683326E9F /* AppModel.swift */; };
 		E68F2F493BCBC14B3BCE29BF /* RoutinesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1526571A993B3EEBD5C03F78 /* RoutinesView.swift */; };
 		E6F685CDCB30D7E5DAFBA413 /* RequestParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE42FFF7E9631F1D3604263E /* RequestParts.swift */; };
+		E78BCA07BC3A6357C69AEC85 /* NeoCallsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98BEC7FD442409490D182D03 /* NeoCallsUITests.swift */; };
 		E79510F625EB13E171B3BBB9 /* HelperViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3E5DF5B94D19CAC9ABC78C1 /* HelperViews.swift */; };
 		E9436705D7CAFC00A2BEE608 /* LiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1FBF2823B6FF09B3D0962A /* LiveActivity.swift */; };
 		E9BCC14B6F50E69A0C26043A /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8784642FF3F7763D4A1B0D46 /* SidebarView.swift */; };
@@ -652,6 +653,7 @@
 		967F497D71C16BA410851985 /* ApprovalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalCard.swift; sourceTree = "<group>"; };
 		97253A097FB095217EC3E459 /* ProjectChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectChip.swift; sourceTree = "<group>"; };
 		9727E790D47ACA0539514958 /* ChatSounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSounds.swift; sourceTree = "<group>"; };
+		98BEC7FD442409490D182D03 /* NeoCallsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoCallsUITests.swift; sourceTree = "<group>"; };
 		98F3156BEEB744D34AF184FB /* PushCenter+Reading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PushCenter+Reading.swift"; sourceTree = "<group>"; };
 		99B3D9308E0995E2D5E1E98E /* AppPluginsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPluginsViews.swift; sourceTree = "<group>"; };
 		9A3335030C10A5603C9C2486 /* MarkdownCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownCache.swift; sourceTree = "<group>"; };
@@ -1208,6 +1210,7 @@
 				1110800A83B6C987DEA232F2 /* IndicatorsUITests.swift */,
 				853B2C74C57A90FAAC0F230A /* LaunchAppearanceUITests.swift */,
 				8A2D7B3ABDAE231999604BAF /* NativeNavigationUITests.swift */,
+				98BEC7FD442409490D182D03 /* NeoCallsUITests.swift */,
 				482FA8388891E6768541ABD4 /* NewChatComposerUITests.swift */,
 				0B7007FFF1EBBE3208FDDC9F /* PluginsUITests.swift */,
 				7F281FE5600EDDA0A9346D0D /* ProcessesUITests.swift */,
@@ -1968,6 +1971,7 @@
 				4F1145F47475D2CFEED8157E /* IndicatorsUITests.swift in Sources */,
 				CCDCC63080B55001CEF70EA7 /* LaunchAppearanceUITests.swift in Sources */,
 				5D5F5518DC8A95C3F159C27C /* NativeNavigationUITests.swift in Sources */,
+				E78BCA07BC3A6357C69AEC85 /* NeoCallsUITests.swift in Sources */,
 				2CDCD7D12F6F20451550637F /* NewChatComposerUITests.swift in Sources */,
 				EB0A522033F38EFED652E5FD /* PluginsUITests.swift in Sources */,
 				88437626B47FBF14208587E1 /* ProcessesUITests.swift in Sources */,
