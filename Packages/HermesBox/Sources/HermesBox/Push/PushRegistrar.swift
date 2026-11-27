@@ -159,8 +159,13 @@ public final class PushRegistrar {
     /// The owner's choices at launch, before the box has answered, so `pushTokensEnabled` is right from the first frame.
     public func configure(preferences: LockScreenPreferences) { self.preferences = preferences }
 
+    @ObservationIgnored private var isForgetting = false
+
     /// Unpairing: tell the box this phone wants nothing more, then forget it.
     public func forget() async {
+        guard !isForgetting else { return }
+        isForgetting = true
+        defer { isForgetting = false }
         let before = pushTokensEnabled
         let shouldUnregister = preferences.wantsPush || state.pendingOptOut
         preferences = .allOff
@@ -181,6 +186,7 @@ public final class PushRegistrar {
     /// The first call after pairing or launch: read the box's answer, then (when it is on and the owner wants push)
     /// register everything known.
     public func start(preferences: LockScreenPreferences) async {
+        guard !isForgetting else { return }
         self.preferences = preferences
         await refreshStatus()
         guard self.preferences.wantsPush else {
@@ -210,6 +216,7 @@ public final class PushRegistrar {
 
     /// The owner changed a choice (the sheet or Settings).
     public func preferencesChanged(_ new: LockScreenPreferences) async {
+        guard !isForgetting else { return }
         let before = pushTokensEnabled
         preferences = new
         if !new.wantsPush {
@@ -360,7 +367,7 @@ public final class PushRegistrar {
     }
 
     private func send(_ registration: APNsRegistration) async {
-        guard let api else { return }
+        guard !isForgetting, let api else { return }
         var registration = registration
         registration.topic = topic
         do {

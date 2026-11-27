@@ -12,6 +12,7 @@ private final class FakeBox: PushServing, @unchecked Sendable {
     var status: APNsStatus?
     var failRegister = false
     var failUnregister = false
+    var afterUnregister: (@MainActor @Sendable () async -> Void)?
     var test = APNsTestResult(alert: .init(sent: true, status: 200, via: nil), activity: .init(sent: true, status: 200, via: "update"))
 
     var registrations: [APNsRegistration] { lock.withLock { _registrations } }
@@ -27,6 +28,7 @@ private final class FakeBox: PushServing, @unchecked Sendable {
     func apnsUnregister(_ unregistration: APNsUnregistration) async throws {
         if failUnregister { throw BFFError.unreachable(detail: "down") }
         lock.withLock { _unregistrations.append(unregistration) }
+        await afterUnregister?()
     }
     func apnsTest() async throws -> APNsTestResult { test }
 }
@@ -113,6 +115,21 @@ struct PushRegistrarTests {
 
         #expect(rig.box.unregistrations == [APNsUnregistration(all: true)])
         #expect(!rig.registrar.pushTokensEnabled && rig.registrar.serverEnabled == nil)
+    }
+
+    @Test func checkingAgainDuringUnpairingCannotRegisterTheOldBoxAfterDeletion() async {
+        let rig = Rig()
+        await rig.registrar.start(preferences: .suggested)
+        let firstRegistrations = rig.box.registrations
+        let registrar = rig.registrar
+        rig.box.afterUnregister = { [weak registrar] in
+            await registrar?.start(preferences: .suggested)
+        }
+
+        await registrar.forget()
+
+        #expect(rig.box.unregistrations == [APNsUnregistration(all: true)])
+        #expect(rig.box.registrations == firstRegistrations)
     }
 
     @Test func aBoxWithPushOffKeepsEverythingLocal() async {

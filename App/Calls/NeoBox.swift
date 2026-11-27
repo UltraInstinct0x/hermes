@@ -252,14 +252,15 @@ final class NeoBox {
         let preferences = LockScreenPreferences(approvals: on)
         lockScreen = preferences
         lockScreenStore.save(preferences)
-        if on { await ensurePaired() }
-        guard lockScreen == preferences, isPaired else { return }
+        if on, !(await ensurePaired()) { return }
+        guard lockScreen == preferences, isPaired, !isPairing else { return }
         await push.preferencesChanged(preferences)
         if !on { await activities.endRequests() }
     }
 
     func refreshPush() async {
-        if lockScreen.approvals { await ensurePaired(quietly: true) }
+        if lockScreen.approvals, !(await ensurePaired(quietly: true)) { return }
+        guard !isPairing else { return }
         await push.start(preferences: lockScreen)
     }
 
