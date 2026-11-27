@@ -169,6 +169,11 @@ public actor GatewaySocket {
         }
     }
 
+    public nonisolated static func failureLogFields(_ error: any Error) -> (domain: String, code: Int) {
+        let failure = error as NSError
+        return (failure.domain, (error as? GatewayRPCError)?.code ?? failure.code)
+    }
+
     private let url: URL
     private let session: URLSession
     private let clientIdentity: ClientIdentity?

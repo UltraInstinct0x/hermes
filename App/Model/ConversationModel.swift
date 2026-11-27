@@ -6740,7 +6740,8 @@ extension ConversationModel {
             } catch is CancellationError {
                 return
             } catch {
-                ConnectionLog.logger.notice("chat: a stop wasn't confirmed (\(BotRoster.describe(error), privacy: .public))")
+                let failure = GatewaySocket.failureLogFields(error)
+                ConnectionLog.logger.notice("chat: a stop wasn't confirmed (\(failure.domain, privacy: .public) \(failure.code, privacy: .public))")
                 guard live?.turn.id == turnID, isWorking else { return }
                 isStopping = false
                 banner = .server(status: 0, code: nil, message: String(localized: "Couldn't confirm Stop on \(gatewayName). It may still be running."))
