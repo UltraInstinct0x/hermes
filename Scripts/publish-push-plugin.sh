@@ -10,7 +10,11 @@ MESSAGE="${1:?commit message}"
 REPO="UltraInstinct0x/hermes-app-push"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-git clone --quiet "https://github.com/$REPO.git" "$WORK/repo"
+if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
+  gh repo clone "$REPO" "$WORK/repo" -- --quiet
+else
+  git clone --quiet "https://github.com/$REPO.git" "$WORK/repo"
+fi
 rsync -a --delete --exclude .git --exclude .claude --exclude .pytest_cache --exclude __pycache__ --exclude '*.pyc' Tools/hermes-app-push/ "$WORK/repo/"
 cd "$WORK/repo"
 git add -A
