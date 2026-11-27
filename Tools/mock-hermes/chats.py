@@ -139,6 +139,7 @@ def resume_chat(params):
     with G.LOCK:
         count = len(G.MESSAGES.get(stored, []))
     return {"session_id": sid, "resumed": stored, "message_count": count, "messages": [], "messages_omitted": True,
+            **({"execution_generation": runtime.get("execution_generation", 0)} if B["CONFIG"].get("session_authority") else {}),
             "info": {**session_model(stored), "running": runtime["running"]},
             **B["live_turn"](runtime), "running": runtime["running"], "session_key": stored,
             "status": "streaming" if runtime["running"] else "idle", "open_requests": B["open_requests"](sid),
@@ -166,6 +167,7 @@ def turn_elsewhere(stored, text, reply, seconds, display_kind="internal_notifica
         with B["LOCK"]:
             runtime = B["RUNTIME"][sid]
             runtime.update(running=True, interrupt=False, turn_started=time.time())
+            runtime["execution_generation"] = runtime.get("execution_generation", 0) + 1
             runtime["inflight"] = {"user": text, "assistant": "", "streaming": True, "display_kind": display_kind}
         G.add_message(stored, "user", text, **extra)
         emit(sid, "session.info", {"running": True})

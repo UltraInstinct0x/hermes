@@ -1118,11 +1118,12 @@ mentions and attachments. Photos staged for a prompt Hermes refused, or one that
 taken back (`image.detach`, `StagedImages`), so they never ride on the next message. Hermes sends
 its queue one envelope per turn: words join a text-only head while nothing waits behind it, and a
 message with photos or files is always a turn of its own, so the tray lets go of only what each turn
-carries (`GatewayHeldQueue`). Stop empties Hermes's queue with the turn. Once the stopped turn
+carries (`GatewayHeldQueue`). Legacy Stop empties Hermes's queue with the turn. Once the stopped turn
 settled, what the tray held comes back to the top of Up Next, whole, held for a Send
 (`UpNextNote.clearedByStop`), except a message the stored chat shows ran after all (its turn started
 just before the Stop got there). A Stop that never got an answer says it couldn't reach the gateway
-and leaves the turn running. Hermes writes a row for each message as it takes it into its queue
+and leaves the turn running. Authority Stop targets one execution generation and keeps the queue.
+Hermes writes a row for each legacy message as it takes it into its queue
 (`display_metadata` `_queued_prompt`) and swaps it for the turn's own row when it runs; after a Stop
 the marked row stays until Hermes next mounts the chat, so the chat never shows a marked row as a
 message (`SessionMessage.isWaitingInQueue`). A message that falls back from Ask Aside or Run in Background with no

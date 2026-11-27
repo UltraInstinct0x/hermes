@@ -607,6 +607,8 @@ def emit(sid, kind, payload):
         if kind == "message.delta" and runtime.get("inflight"):
             runtime["inflight"]["assistant"] += str(payload.get("text") or "")
         event = {"type": kind, "session_id": sid, "seq": runtime["seq"], "payload": payload}
+        if CONFIG.get("session_authority") and runtime.get("execution_generation") is not None:
+            event["execution_generation"] = runtime["execution_generation"]
         # Like Hermes' replay ring (tui_gateway/event_replay.py): 512 events or 4 MiB a session, oldest out
         # first, and a watermark of the newest one evicted, so a client that missed it hears `truncated`.
         frozen = {"type": kind, "session_id": sid, "payload": payload}
@@ -776,6 +778,7 @@ def start_turn(sid, text, runner):
         runtime["running"] = True
         runtime["interrupt"] = False
         runtime["turn_started"] = time.time()
+        runtime["execution_generation"] = runtime.get("execution_generation", 0) + 1
         # Hermes builds the turn's agent first: half a second here, 6 s for a "cold start" (a loaded
         # Mac), in which only a redirect queues and a steer is refused 4010.
         runtime["agent_build_s"] = 6.0 if "cold start" in text.lower() else 0.5
@@ -2272,6 +2275,7 @@ def method_session_resume(params):
             raise RPCError(4009, "session disconnect interrupt settling")
         omit = bool(params.get("omit_messages"))
         return {"session_id": sid, "resumed": stored, "message_count": len(session["messages"]),
+                **({"execution_generation": runtime.get("execution_generation", 0)} if CONFIG.get("session_authority") else {}),
                 "messages": [] if omit else session["messages"], "messages_omitted": omit,
                 "info": {"model": PROFILES[profile]["model"], "running": runtime["running"]},
                 **live_turn(runtime), "running": runtime["running"], "session_key": stored,
@@ -2553,19 +2557,28 @@ def submit_prompt(sid, runtime, params):
 
 
 def method_session_interrupt(params):
-    """Hermes's `session.interrupt` (`session_lifecycle.py`): the turn stops, unread steers go, and the
-    whole queue held for the next turn is purged: nothing in it runs."""
+    """Stop the exact authority execution. On legacy, stop the turn and purge the queue."""
     sid, runtime = runtime_for(params)
     with LOCK:
+        authority = CONFIG.get("session_authority")
+        if authority:
+            if (params.get("profile") or "default") != runtime["profile"]:
+                raise RPCError(4001, "not_found", {"reason": "not_found"})
+            if params.get("execution_generation") != runtime.get("execution_generation", 0):
+                raise RPCError(4001, "stale_generation", {"reason": "stale_generation"})
         runtime["interrupt"] = True
-        runtime["queue"] = []
-        runtime.pop("steers", None)
+        if not authority:
+            runtime["queue"] = []
+            runtime.pop("steers", None)
         cancelled = [(rid, e) for rid, e in PENDING.items() if e["sid"] == sid]
     for rid, entry in cancelled:
         entry["event"].set()
         # Each open request is withdrawn under its own method (`server_requests.cancel`). An approval gets
         # no `approval.cancelled` here: withdrawing the request already took it off Hermes's queue.
         emit(sid, "request.cancel", {"id": rid, "method": entry["frame"]["method"], "reason": "interrupted"})
+    if authority:
+        return {"ref": {"profile_id": runtime["profile"], "session_id": runtime["stored"]},
+                "execution_generation": params["execution_generation"]}
     return {"status": "interrupted"}
 
 
@@ -3123,7 +3136,9 @@ class Handler(BaseHTTPRequestHandler):
                 running = [sid for sid, runtime in RUNTIME.items() if runtime["running"] and not runtime.get("dead")
                            and (not profile or runtime["profile"] == profile)]
             for sid in running:
-                method_session_interrupt({"session_id": sid})
+                runtime = RUNTIME[sid]
+                method_session_interrupt({"session_id": sid, "profile": runtime["profile"],
+                                          "execution_generation": runtime.get("execution_generation", 0)})
             deadline = time.time() + float(body.get("seconds") or 15)
             while True:
                 with LOCK:

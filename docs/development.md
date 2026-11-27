@@ -483,8 +483,9 @@ command and each refusal, and each `session.list` and `session.create`. Without 
 agent being built; 6 s when the message says "cold start", as on a loaded Mac) and answers `rejected` when idle; while Hermes compacts the chat (a "snapshot"
 message with "compact", or a Bot Chat's "slow … compact", compacts for 8 s after its first step,
 `status.update` kind `compacting`) a steer or redirect is held for the next turn and answered
-`queued`; `session.interrupt` empties the queue held for
-the next turn. A turn stopped while a card waits (an approval, a question, a password) ends as on
+`queued`; legacy `session.interrupt` empties the queue held for the next turn. On the session
+authority it requires the current `execution_generation`, rejects a stale generation, and keeps
+the queue. A turn stopped while a card waits (an approval, a question, a password) ends as on
 Hermes: the card is withdrawn (`request.cancel` with the card's own method, reason `interrupted`)
 and the turn ends `interrupted` with no reply stored. On the API server mock a chat's runs go one at a time: a run posted behind another
 answers `started` but sends nothing and reads `queued` until it runs, `POST /v1/runs/{id}/steer`
@@ -1261,4 +1262,3 @@ running), Obsidian Memory (off), Langfuse (two keys missing), agent-ledger (pull
 homeassistant update that asks for more access in Hermes's words. `--plugin-catalog none` answers
 404 for the feed; `POST /api/mock/plugin-hub {failing, feed}` makes installs fail or the feed vanish
 while it runs. `-HERMES_APPS_TOOLS plugins` opens the hub, `plugins:suggested` the Mac's pane.
-

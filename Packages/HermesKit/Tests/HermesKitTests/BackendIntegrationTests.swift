@@ -116,6 +116,42 @@ struct BackendIntegrationTests {
         #expect(live.turn.steps.contains { if case .tool(let tool) = $0 { tool.status == .succeeded && tool.callID != nil } else { false } })
     }
 
+    @Test(.timeLimit(.minutes(1))) func authorityStopFencesTheGenerationAndKeepsQueuedWork() async throws {
+        let (_, socket) = try await connect()
+        defer { Task { await socket.close() } }
+        guard await socket.sessionAuthority else { return }
+        let created = try await socket.request("session.create", ["profile": .string("default"), "title": .string("Stop scratch")])
+        let stored = try #require(created["stored_session_id"]?.stringValue)
+        let runtime = try #require(created["session_id"]?.stringValue)
+        let events = await socket.messages()
+        var iterator = events.makeAsyncIterator()
+        _ = try await submit(PromptSubmitContract(sessionID: runtime, text: "marathon before Stop"), on: socket)
+        var liveGeneration: Int?
+        while let message = await iterator.next() {
+            guard case .frame(.event(let event)) = message, event.sessionID == runtime, event.type == "message.start" else { continue }
+            liveGeneration = event.executionGeneration
+            break
+        }
+        let generation = try #require(liveGeneration)
+        let resumed = try await socket.request("session.resume", ["session_id": .string(stored), "omit_messages": .bool(true)])
+        #expect(resumed["execution_generation"]?.truncatedIntValue == generation)
+        _ = try await submit(PromptSubmitContract(sessionID: runtime, text: "queued after Stop"), on: socket)
+        let stale = await #expect(throws: GatewayRPCError.self) {
+            try await socket.interrupt(sessionID: runtime, profile: nil, generation: generation - 1)
+        }
+        #expect(stale?.refusalReason == "stale_generation")
+        let stopped = try await socket.interrupt(sessionID: runtime, profile: nil, generation: generation)
+        #expect(stopped)
+        var endings: [String] = []
+        while let message = await iterator.next() {
+            guard case .frame(.event(let event)) = message, event.sessionID == runtime,
+                  event.type == "message.complete", let status = event.payload["status"]?.stringValue else { continue }
+            endings.append(status)
+            if endings.count == 2 { break }
+        }
+        #expect(endings == ["interrupted", "complete"])
+    }
+
     @Test func approvalsAreServerRequests() async throws {
         let (_, socket) = try await connect()
         defer { Task { await socket.close() } }

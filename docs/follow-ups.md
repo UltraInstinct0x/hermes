@@ -173,11 +173,12 @@ design's component names, used in code comments.
   settles ([chat.md](chat.md) §4b). Behind a turn that can't take a note (finishing, stopping, or
   running elsewhere) Send queues what's typed, and the chip shows Send Next.
 - **Stop:** the trailing Stop interrupts the turn (`session.interrupt`, or
-  `POST /v1/runs/{id}/stop`) and does **not** drain the app's queue. Over the gateway protocol
+  `POST /v1/runs/{id}/stop`) and does **not** drain the app's queue. On a legacy gateway socket
   Hermes also empties its own queue, ends the chat's running helpers and declines the approval the
   turn waited on; background processes keep running. What its queue held comes back first in Up
   Next, Not sent ([chat.md](chat.md) §4c), and a receipt under the turn names the rest ("Stop also
-  stopped 2 helpers and declined the approval Hermes was waiting on.", `StopReceipt`). Over the API
+  stopped 2 helpers and declined the approval Hermes was waiting on.", `StopReceipt`). The session
+  authority interrupts only the observed generation and keeps its queued prompts. Over the API
   server Stop ends only that run: other runs Hermes queued still run. The tray stays, and Send with an
   empty field sends the first item. The next turn that starts resumes draining. A message sent
   with Send while the turn is still stopping goes to Up Next, and the queue drains when it ends.
