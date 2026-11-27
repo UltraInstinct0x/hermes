@@ -231,7 +231,7 @@ final class NeoBox {
         push.attach(client)
         Task { [voip] in await voip.start() }
         Task { [weak self] in
-            guard let self, self.box == paired, lockScreen.approvals else { return }
+            guard let self, self.box == paired else { return }
             await push.start(preferences: lockScreen)
         }
     }

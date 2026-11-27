@@ -11,6 +11,7 @@ private final class FakeBox: PushServing, @unchecked Sendable {
     private var _unregistrations: [APNsUnregistration] = []
     var status: APNsStatus?
     var failRegister = false
+    var failUnregister = false
     var test = APNsTestResult(alert: .init(sent: true, status: 200, via: nil), activity: .init(sent: true, status: 200, via: "update"))
 
     var registrations: [APNsRegistration] { lock.withLock { _registrations } }
@@ -23,7 +24,10 @@ private final class FakeBox: PushServing, @unchecked Sendable {
         lock.withLock { _registrations.append(registration) }
     }
 
-    func apnsUnregister(_ unregistration: APNsUnregistration) async throws { lock.withLock { _unregistrations.append(unregistration) } }
+    func apnsUnregister(_ unregistration: APNsUnregistration) async throws {
+        if failUnregister { throw BFFError.unreachable(detail: "down") }
+        lock.withLock { _unregistrations.append(unregistration) }
+    }
     func apnsTest() async throws -> APNsTestResult { test }
 }
 
@@ -84,6 +88,22 @@ struct PushRegistrarTests {
         #expect(!rig.registrar.pushTokensEnabled, "no push tokens are requested from ActivityKit")
         await rig.registrar.handle(.pushToStart(kind: .requests, token: "aa"))
         #expect(rig.box.registrations.isEmpty)
+    }
+
+    @Test func failedOptOutIsRetriedAfterRestartWithRequestsOff() async {
+        let rig = Rig()
+        await rig.registrar.start(preferences: .suggested)
+        rig.box.failUnregister = true
+        await rig.registrar.preferencesChanged(.allOff)
+        #expect(rig.box.unregistrations.isEmpty)
+
+        rig.box.failUnregister = false
+        let next = PushRegistrar(platform: FakePlatform(), state: rig.state)
+        next.attach(rig.box)
+        await next.start(preferences: .allOff)
+        await next.start(preferences: .allOff)
+
+        #expect(rig.box.unregistrations == [APNsUnregistration(all: true)])
     }
 
     @Test func aBoxWithPushOffKeepsEverythingLocal() async {

@@ -32,11 +32,13 @@ public protocol RemoteNotificationPlatform: AnyObject, Sendable {
 public protocol PushStateStoring: Sendable {
     var serverEnabled: Bool? { get set }
     var lastPushReceivedAt: Date? { get set }
+    var pendingOptOut: Bool { get set }
 }
 
 public final class InMemoryPushState: PushStateStoring, @unchecked Sendable {
     public var serverEnabled: Bool?
     public var lastPushReceivedAt: Date?
+    public var pendingOptOut = false
     public init(serverEnabled: Bool? = nil, lastPushReceivedAt: Date? = nil) {
         self.serverEnabled = serverEnabled
         self.lastPushReceivedAt = lastPushReceivedAt
@@ -55,6 +57,11 @@ public final class UserDefaultsPushState: PushStateStoring, @unchecked Sendable 
     public var lastPushReceivedAt: Date? {
         get { defaults.object(forKey: "hermes.push.lastReceivedAt") as? Date }
         set { defaults.set(newValue, forKey: "hermes.push.lastReceivedAt") }
+    }
+
+    public var pendingOptOut: Bool {
+        get { defaults.bool(forKey: "hermes.push.pendingOptOut") }
+        set { defaults.set(newValue, forKey: "hermes.push.pendingOptOut") }
     }
 }
 
@@ -162,6 +169,7 @@ public final class PushRegistrar {
     public func attach(_ api: (any PushServing)?) {
         self.api = api
         if api == nil {
+            state.pendingOptOut = false
             setServerEnabled(nil)
         }
     }
@@ -171,7 +179,12 @@ public final class PushRegistrar {
     public func start(preferences: LockScreenPreferences) async {
         self.preferences = preferences
         await refreshStatus()
-        guard serverEnabled == true, preferences.wantsPush else { return }
+        guard self.preferences.wantsPush else {
+            await retryOptOut()
+            return
+        }
+        state.pendingOptOut = false
+        guard serverEnabled == true else { return }
         await beginPlatform()
         guard pushTokensEnabled else { return }
         await send(fullRegistration())
@@ -196,10 +209,12 @@ public final class PushRegistrar {
         let before = pushTokensEnabled
         preferences = new
         if !new.wantsPush {
-            await unregisterAll()
+            state.pendingOptOut = true
             notifyGate(before)
+            await retryOptOut()
             return
         }
+        state.pendingOptOut = false
         if serverEnabled == nil { await refreshStatus() }
         guard serverEnabled == true else { notifyGate(before); return }
         await beginPlatform()
@@ -323,10 +338,21 @@ public final class PushRegistrar {
     }
 
     private func unregisterAll() async {
-        try? await api?.apnsUnregister(APNsUnregistration(all: true))
+        guard let api else { return }
+        do {
+            try await api.apnsUnregister(APNsUnregistration(all: true))
+            state.pendingOptOut = false
+        } catch {
+            update { $0.lastError = "Could not tell your box this phone turned off Requests." }
+        }
         deviceToken = nil
         activities = [:]
         update { $0.deviceTokenRegistered = false; $0.requestsActivityRegistered = false }
+    }
+
+    private func retryOptOut() async {
+        guard state.pendingOptOut, !preferences.wantsPush else { return }
+        await unregisterAll()
     }
 
     private func send(_ registration: APNsRegistration) async {
