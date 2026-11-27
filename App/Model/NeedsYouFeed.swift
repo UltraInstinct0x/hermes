@@ -1,6 +1,11 @@
 import Foundation
 import HermesKit
 import Observation
+#if os(iOS)
+import HermesActivityKit
+import HermesBox
+import HermesPush
+#endif
 
 extension LedgerSource {
     var setupStatus: SetupStatus {
@@ -237,6 +242,37 @@ final class NeedsYouFeed {
     }
 
     #if os(iOS)
+    func answerFromLiveActivity(botKey: BotKey, requestId: String, shown: String, answer: WatchCompanion.RequestAnswer,
+                                workspaces: [BotWorkspace]) async -> Bool {
+        guard NotificationCatalog.lockScreenAnswersEnabled, RequestActivityPresentation.isExactRequestID(requestId),
+              !botKey.gatewayId.isEmpty, !botKey.profileId.isEmpty else { return false }
+        await ledgerRefresh.waitForNextSnapshot { await self.refreshSnapshot(workspaces) }
+        let matches = snapshot?.open.filter {
+            $0.requestID == requestId && $0.gatewayID == botKey.gatewayId && ($0.profileID ?? $0.profile) == botKey.profileId
+        } ?? []
+        guard matches.count == 1, let row = matches.first, let session = row.sessionID, let route = routes[row.id],
+              let gateway = routes.gateway(for: row.id), answering.insert(row.id).inserted else { return false }
+        defer { answering.remove(row.id) }
+        do {
+            return try await Self.answerOnOwner(row, session: session, route: route) { snapshot in
+                guard self.routes.gateway(for: row.id) == gateway,
+                      let live = WatchCompanion.RequestCard(row: row, snapshot: snapshot, gateway: gateway, source: "") else { return nil }
+                switch (live.content, answer) {
+                case (.approval(let command, _), .approval):
+                    guard !shown.isEmpty, command == shown else { return nil }
+                case (.clarify(let questions), .clarify(let answers)):
+                    guard questions.count == 1, let question = questions.first, !question.multiSelect,
+                          question.prompt == VisibleText.of(shown), case .text(let choice) = answers[question.id],
+                          question.choices.contains(choice) else { return nil }
+                default: return nil
+                }
+                return live.result(for: answer)
+            }
+        } catch {
+            return false
+        }
+    }
+
     func watchRequests(_ workspaces: [BotWorkspace], usePublished: Bool) async -> WatchCompanion.Response {
         if !usePublished || snapshot == nil {
             await ledgerRefresh.waitForNextSnapshot { await self.refreshSnapshot(workspaces) }

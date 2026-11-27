@@ -477,6 +477,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     /// stops the app if that runs anywhere else. The `async` form called it wherever the handling
     /// finished, and opening a notice crashed the app (TestFlight 2610152328).
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping @Sendable () -> Void) {
+        #if os(iOS)
+        // Hermes Neo: the box's request alerts open the app through their own route.
+        if NeoNotificationRouting.handle(response, completion: completionHandler) { return }
+        #endif
         let response = PushResponder.Response(response)
         Task { @MainActor in
             await PushCenter.shared.handle(response)

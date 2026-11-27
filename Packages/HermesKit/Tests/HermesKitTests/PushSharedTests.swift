@@ -87,4 +87,14 @@ struct PushSharedTests {
         #expect(shared.gatewayCheck(appID: home, hasToken: false, canNotify: true) == .status)
         #expect(shared.gatewayCheck(appID: home, hasToken: true, canNotify: false) == .status)
     }
+
+    @Test func requestsOnlyAuthorizationDoesNotRegisterTheRelayAfterRelaunch() {
+        let shared = shared()
+        shared.requestsOnlyAuthorization = true
+        let relaunched = PushShared(suiteName: suite)
+        #expect(relaunched.gatewayCheck(appID: home, hasToken: true, canNotify: true) == .status)
+
+        relaunched.requestsOnlyAuthorization = false
+        #expect(relaunched.gatewayCheck(appID: home, hasToken: true, canNotify: true) == .register)
+    }
 }

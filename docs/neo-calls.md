@@ -47,10 +47,11 @@ and on the simulator, or `production` on a Release device; `DELETE /bff/push/voi
 `GET /bff/push/apns/status` (`voip`);
 `POST /bff/call-owner/test-ring`; the call socket `/gw/<id>/api/call/ws` (`box/call-hub/protocol.mjs`).
 
-On a device the app reads both push environments from the build setting that supplies its `aps-environment`
-entitlement. Alerts register through the [gateway plugin](notifications.md), not the box device
-registration endpoint. The plugin calls the sandbox `development`; the box's sealed push relay
-translates it to `sandbox` when sending to APNs.
+On a device the app reads the push environment from the build setting that supplies its
+`aps-environment` entitlement. Neo registers VoIP tokens and Lock Screen request tokens with the
+box using `sandbox` or `production`. Sealed alerts register separately through the
+[gateway plugin](notifications.md), which calls the sandbox `development`; the box's sealed push
+relay translates it to `sandbox` when sending to APNs.
 
 ## 4. Pairing on the gateway login
 
