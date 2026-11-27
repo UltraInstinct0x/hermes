@@ -11,7 +11,7 @@ REPO="UltraInstinct0x/hermes-app-push"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
-  gh repo clone "$REPO" "$WORK/repo" -- --quiet
+  GH_HOST=github.com gh repo clone "$REPO" "$WORK/repo" -- --quiet
 else
   git clone --quiet "https://github.com/$REPO.git" "$WORK/repo"
 fi
