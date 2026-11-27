@@ -83,10 +83,16 @@ struct PluginRegistryTests {
     /// Push 1.4.9 runs on a Windows gateway host with 1.4.8's access, so the pin moved to it quietly.
     @Test func push149KeepsTheSameAccess() throws {
         let push = AppPlugin.push
-        #expect(push.version == "1.4.9" && push.minimumVersion == "1.4.9")
         let older = try #require(push.capabilities["1.4.8"]), newer = try #require(push.capabilities["1.4.9"])
         #expect(!newer.widens(older))
         #expect(newer == older)
+    }
+
+    @Test func neoPushPinKeepsTheSameAccess() throws {
+        let push = AppPlugin.push
+        #expect(push.version == "1.4.10" && push.minimumVersion == "1.4.10")
+        let older = try #require(push.capabilities["1.4.9"])
+        #expect(push.pinnedCapabilities == older)
     }
 
     /// Widgets 1.6.0 adds the `client` command, which uses the `pre_llm_call` hook 1.5.0 already has:
@@ -225,6 +231,12 @@ struct PluginRegistryTests {
     /// Push 1.4.8 installed: 1.4.9 has the same access, so it updates without asking.
     @Test func push149MovesQuietlyFrom148() async {
         let survey = await survey(["default": [row("hermes-app-push", version: "1.4.8")]], plugins: [.push])
+        #expect(survey.held().isEmpty)
+        #expect(survey.plan().map(\.profile) == ["default", "ada", "ops"])
+    }
+
+    @Test func neoPushPinMovesQuietlyFrom149() async {
+        let survey = await survey(["default": [row("hermes-app-push", version: "1.4.9")]], plugins: [.push])
         #expect(survey.held().isEmpty)
         #expect(survey.plan().map(\.profile) == ["default", "ada", "ops"])
     }

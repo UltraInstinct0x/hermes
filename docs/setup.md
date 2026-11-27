@@ -470,7 +470,7 @@ restart Hermes's backend. One Bot: Partly set up. Docs: `user-guide/bot-mode`.
 The permission (`UNUserNotificationCenter`), and on iPhone and iPad the gateway's push plugin
 reached through Bot Mode (`PushCenter.GatewayState`). Off in Settings: Open Settings. Not asked yet:
 Turn On Notifications. No plugin: Set Up… on the Notifications page, or `hermes plugins install
-vburojevic/hermes-app-push --enable` and `hermes gateway restart`. The plugin there but this iPhone
+UltraInstinct0x/hermes-app-push --enable` and `hermes gateway restart`. The plugin there but this iPhone
 not on its list (`status.registered` false, for want of permission or a push address from Apple):
 Not set up, with the reason. A gateway this iPhone stopped (Stop Notifications on its detail page):
 Not set up, "You stopped notifications from <gateway>.", with Set Up…, which clears the stop and

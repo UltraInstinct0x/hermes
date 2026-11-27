@@ -1,13 +1,13 @@
 # hermes-app-push
 
-Push notifications for the [Hermes](https://github.com/vburojevic/hermes) iPhone, iPad and Mac app.
+Push notifications for the [Hermes Neo](https://github.com/UltraInstinct0x/hermes/tree/neo) iPhone, iPad and Mac app.
 Hermes Agent can't push to Apple, so this gateway plugin listens to Hermes's plugin hooks, seals each
 notice for every registered device and sends it through the Caffeinated Code push relay to APNs. The
 relay sees only routing fields and an encrypted envelope.
 
-The app's [docs/plugins.md](https://github.com/vburojevic/hermes/blob/main/docs/plugins.md) covers
+The app's [docs/plugins.md](https://github.com/UltraInstinct0x/hermes/blob/neo/docs/plugins.md) covers
 what works without the plugin, installing, updating and changing it, and
-[docs/notifications.md](https://github.com/vburojevic/hermes/blob/main/docs/notifications.md) the
+[docs/notifications.md](https://github.com/UltraInstinct0x/hermes/blob/neo/docs/notifications.md) the
 whole design. This plugin is developed in the app's repository (`Tools/hermes-app-push`) and
 published here with `Scripts/publish-push-plugin.sh`; send changes there.
 
@@ -16,8 +16,8 @@ published here with `Scripts/publish-push-plugin.sh`; send changes there.
 Each Bot is a Hermes profile with its own plugins, so install it in the root and in every profile:
 
 ```sh
-hermes plugins install vburojevic/hermes-app-push --enable
-for p in $(ls ~/.hermes/profiles 2>/dev/null); do hermes -p "$p" plugins install vburojevic/hermes-app-push --enable; done
+hermes plugins install UltraInstinct0x/hermes-app-push --enable
+for p in $(ls ~/.hermes/profiles 2>/dev/null); do hermes -p "$p" plugins install UltraInstinct0x/hermes-app-push --enable; done
 hermes gateway restart        # registers the apppush delivery and starts the Board and tidy watcher
 ```
 

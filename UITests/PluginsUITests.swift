@@ -92,7 +92,7 @@ final class PluginsUITests: XCTestCase {
         XCTAssertTrue(words.waitForExistence(timeout: 60), "the failure isn't in words")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Could not resolve host'")).firstMatch.exists, "Hermes's message is missing")
         XCTAssertTrue(app.buttons["Try Again"].exists)
-        XCTAssertTrue(app.staticTexts["hermes plugins install vburojevic/hermes-app-push --enable"].exists, "no Terminal commands")
+        XCTAssertTrue(app.staticTexts["hermes plugins install UltraInstinct0x/hermes-app-push --enable"].exists, "no Terminal commands")
     }
 
     /// Apps and Tools → Plugins without Bot Mode (`pluginsNeedsBotMode`): the card, and the app's

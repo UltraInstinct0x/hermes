@@ -7,7 +7,7 @@ run inside the person's own Hermes, and are published to public repositories tha
 
 | Plugin | What it adds | Source | State |
 |---|---|---|---|
-| `hermes-app-push` | Push notifications on iPhone and iPad, answers from the Lock Screen, Live Activity updates, scheduled tasks delivered to the app | [`Tools/hermes-app-push`](../Tools/hermes-app-push/README.md), published to [vburojevic/hermes-app-push](https://github.com/vburojevic/hermes-app-push) | Shipped, 1.4.9 |
+| `hermes-app-push` | Push notifications on iPhone and iPad, answers from the Lock Screen, Live Activity updates, scheduled tasks delivered to the app | [`Tools/hermes-app-push`](../Tools/hermes-app-push/README.md), published to [UltraInstinct0x/hermes-app-push](https://github.com/UltraInstinct0x/hermes-app-push) | Shipped, 1.4.10 |
 | `hermes-app-widgets` | Widgets agents send to the app: approvals, forms, checklists, results, with plain text on every other platform | [`Tools/hermes-app-widgets`](../Tools/hermes-app-widgets/README.md), published to [vburojevic/hermes-app-widgets](https://github.com/vburojevic/hermes-app-widgets) | Shipped, 1.6.0 |
 
 Everything else the app does runs on a stock Hermes Agent: the API server for chats, and
@@ -71,7 +71,9 @@ The design is the Elyx project's `docs/plugins.md`; its frames are named below.
   reaches it) and that every pinned hook is named on the review. A version changed in `Tools/` but
   not yet published has its list ahead of the pin until it's published. A pin that adds access shows
   the consent card: push 1.4.7 added `on_session_delete` ("Knows when chats are deleted or
-  archived"). The pins are push 1.4.9 and widgets 1.6.0; widgets 1.6.0 adds the `client` command
+  archived"). Push 1.4.10 installs from the Neo repository, replacing upstream 1.4.9 without
+  changing the plugin ID or requesting more access. It carries ledger routing when supplied and
+  omits sudo prompt context from notices. Widgets 1.6.0 adds the `client` command
   (the model learns which app and device sent each turn, §6) with 1.5.0's access, so the app moves
   every profile to it without the consent card. A new app plugin is one entry and a What's New row.
 - **When it looks.** When Bot Mode connects (at most hourly) it reads every profile's plugins
@@ -156,9 +158,9 @@ Without Bot Mode the app can't reach the plugins, so it neither asks nor install
 ### 2.2 By hand
 
 ```sh
-hermes plugins install vburojevic/hermes-app-push --enable      # the root (the primary Bot)
+hermes plugins install UltraInstinct0x/hermes-app-push --enable      # the root (the primary Bot)
 for p in $(ls ~/.hermes/profiles 2>/dev/null); do                 # every other Bot
-  hermes -p "$p" plugins install vburojevic/hermes-app-push --enable
+  hermes -p "$p" plugins install UltraInstinct0x/hermes-app-push --enable
 done
 hermes gateway restart
 ```
@@ -197,7 +199,7 @@ and slider glyphs, `unit_one` and `from_now`, and so does 1.6.0, which adds the 
 **Installed by the app**, a plugin is pinned to the commit the app was tested with, and the app
 moves it: an app that needs a newer plugin reinstalls it over the old one (§2.1). `hermes plugins
 update` refuses a pinned install ("pinned to <sha>"); by hand, reinstall it with
-`hermes plugins install vburojevic/hermes-app-push --enable --force --ref <40-character SHA>`.
+`hermes plugins install UltraInstinct0x/hermes-app-push --enable --force --ref <40-character SHA>`.
 
 **Installed by hand:**
 

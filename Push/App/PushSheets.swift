@@ -142,7 +142,7 @@ struct PushSetupSheet: View {
     @State private var flow = PushSetupFlow()
 
     /// Where people get the plugin.
-    static let pluginSource = "vburojevic/hermes-app-push"
+    static let pluginSource = AppPlugin.push.repo
     static let installCommand = "hermes plugins install \(pluginSource) --enable"
     /// Each Bot is a profile with its own plugins.
     static let profilesCommand = "for p in $(ls ~/.hermes/profiles 2>/dev/null); do hermes -p \"$p\" plugins install \(pluginSource) --enable; done"

@@ -141,7 +141,7 @@ struct AppPluginsTests {
         #expect(sent.map(\.method) == ["plugins.manage", "plugins.manage"])
         let first = sent[0].params
         #expect(first["action"]?.stringValue == "install")
-        #expect(first["repo"]?.stringValue == "vburojevic/hermes-app-push")
+        #expect(first["repo"]?.stringValue == "UltraInstinct0x/hermes-app-push")
         #expect(first["ref"]?.stringValue == push.ref)
         #expect(first["profile"]?.stringValue == "ops")
         #expect(first["enable"]?.boolValue == true)
