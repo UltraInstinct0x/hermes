@@ -17,6 +17,10 @@ final class TalkCenter {
     static let shared = TalkCenter()
 
     private(set) var session: TalkSession?
+    /// Hermes Neo: a call the app didn't start itself (a bot's call through the owner's box, `App/Calls`), shown with
+    /// the Talk views while it runs: the call pill, End, minimise. Its screen and its summary are its own.
+    private(set) var external: (any TalkDisplay)?
+    @ObservationIgnored private var endExternal: (() -> Void)?
     /// Shown (full screen, the iPad panel, the Mac window), or minimised to the call pill.
     var isExpanded = true
     /// Calls that ended, by chat: each folds its turns into a `callSummary` card.
@@ -61,7 +65,24 @@ final class TalkCenter {
         TalkActivity.shared.endLeftovers()
     }
 
-    var isActive: Bool { session != nil }
+    var isActive: Bool { session != nil || external != nil }
+
+    /// The call the Talk views show: the app's own, or an external one (Hermes Neo).
+    var display: (any TalkDisplay)? { session ?? external }
+
+    /// Hermes Neo: shows `call` as the current call; `end` ends it (End on the pill, the menu, Siri).
+    func attach(external call: any TalkDisplay, expanded: Bool, end: @escaping () -> Void) {
+        external = call
+        endExternal = end
+        isExpanded = expanded
+    }
+
+    func detachExternal() {
+        guard external != nil else { return }
+        external = nil
+        endExternal = nil
+        isExpanded = true
+    }
 
     var pendingCall: PendingCall? { pending.call }
 
@@ -207,6 +228,10 @@ final class TalkCenter {
     }
 
     func end() {
+        if session == nil, let endExternal {
+            endExternal()
+            return
+        }
         guard let session else { return }
         self.session = nil
         isExpanded = true
@@ -278,7 +303,7 @@ final class TalkCenter {
         return !trimmed.isEmpty && trimmed.count <= 360
     }
 
-    private func save(_ record: CallRecord) {
+    func save(_ record: CallRecord) {
         records.removeAll { $0.id == record.id }
         records.append(record)
         // A month of calls is plenty.

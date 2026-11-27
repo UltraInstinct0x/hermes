@@ -40,6 +40,17 @@ public enum CallFolding {
         for span in spans {
             if let last = items.last(where: { folds.rows[$0.id] == span.id }) {
                 folds.cardAfter[last.id] = span.id
+            } else if let before = items.last(where: { item in
+                // A call none of whose words are in this chat (Hermes Neo: a bot's call through the box): its card
+                // goes after the last message from before it ended, unless another call's card is there.
+                guard folds.cardAfter[item.id] == nil else { return false }
+                switch item {
+                case .user(let entry): return entry.timestamp.map { $0 <= span.end } ?? false
+                case .assistant(let turn): return turn.startedAt.map { $0 <= span.end } ?? false
+                default: return false
+                }
+            }) {
+                folds.cardAfter[before.id] = span.id
             }
         }
         return folds
