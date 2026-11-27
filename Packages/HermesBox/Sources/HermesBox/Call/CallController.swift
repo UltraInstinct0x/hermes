@@ -420,7 +420,10 @@ public final class CallController {
     }
 
     public func end() {
-        guard session != nil, isInCall else { return }
+        guard isInCall else { return }
+        // Hermes Neo: a call whose socket never joined (the phone could not reach the box) has no session to send the end
+        // through; End must still close it here, or the screen and CallKit stay stuck until the app is killed.
+        guard session != nil else { return finishLocally(.byClient) }
         apply(session?.end() ?? [])
         publish()
         let mine = generation
