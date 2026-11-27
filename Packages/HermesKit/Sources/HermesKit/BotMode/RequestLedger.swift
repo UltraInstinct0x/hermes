@@ -252,7 +252,7 @@ public struct LedgerSnapshot: Decodable, Sendable, Equatable {
         }
         if matches.count == 1, let row = matches.first {
             if row.state == "open" { return .pending(row) }
-            if LedgerHistory.closedStates.contains(row.state) { return .notPending }
+            if row.state == "settled" || LedgerHistory.closedStates.contains(row.state) { return .notPending }
             return .unavailable
         }
         guard matches.isEmpty,

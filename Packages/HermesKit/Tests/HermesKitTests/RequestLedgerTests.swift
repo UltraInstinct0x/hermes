@@ -19,6 +19,20 @@ import Testing
         #expect(lookup([.init(id: owner, state: .live)], open: [row]) == .pending(row))
     }
 
+    @Test func anExactSettledLedgerRowIsNotPending() throws {
+        func lookup(_ state: String, request: String = "target") throws -> LedgerSnapshot.Lookup {
+            let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
+                {"request_id":"\(request)","session_id":"chat","gateway_id":"owner","profile":"bot",
+                 "kind":"approval","state":"\(state)","created_at":2}
+                """)))
+            return LedgerSnapshot(open: [], recent: [row], openCount: 0, sources: nil)
+                .lookup(gatewayID: "owner", profileID: "bot", sessionID: "chat", requestID: "target")
+        }
+        #expect(try lookup("settled") == .notPending)
+        #expect(try lookup("settled", request: "different") == .unavailable)
+        #expect(try lookup("unverified") == .unavailable)
+    }
+
     @Test func nativeApprovalUsesCanonicalPromptIdentityAndOfferedChoices() throws {
         let row: LedgerRow = try RequestLedgerClient.decode(try #require(JSONValue.parse("""
             {"request_id":"native-id","session_id":"session-1","profile":"default","kind":"approval","state":"open","created_at":2}
