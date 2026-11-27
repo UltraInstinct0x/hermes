@@ -30,6 +30,7 @@ Scripted Bot Chat behaviour by message content:
 import argparse
 import base64
 import hashlib
+import hmac
 import importlib.util
 import itertools
 import json
@@ -157,6 +158,9 @@ WS_ROUTES = {}      # path -> fn(handler, query): other WebSockets (kanban.py's 
 RAW_ROUTES = {}     # (method, path) -> fn(query) -> (status, content_type, bytes): authenticated files (inspector.py)
 
 CONFIG = {"token": secrets.token_urlsafe(24), "password": None, "username": "admin", "hermes_version": "0.21.6"}
+# --webapp-gateway: the gateway's Webapp sign-in (docs/development.md). Its cookies end in
+# `_<gateway>` and a login needs the `hermes_webapp_signin` binding too.
+WEBAPP = {"gateway": None, "token": secrets.token_urlsafe(24), "sent": None}
 
 
 def ws_max_bytes():
@@ -2131,8 +2135,85 @@ def new_runtime(stored, profile, *, title=None, hidden=False):
 def runtime_for(params):
     sid = params.get("session_id") or ""
     if sid not in RUNTIME or RUNTIME[sid].get("dead"):  # a runtime id from before a restart
+        if CONFIG.get("session_authority"):
+            # gateway/session_authority.py@v0.23.4:230: `AuthorityRefusal('not_found')`, sent as 4001
+            # with the reason for its message and in its data (session_controls.py `_refusal_data`).
+            raise RPCError(4001, "not_found", {"reason": "not_found"})
         raise RPCError(4001, "session not found")
     return sid, RUNTIME[sid]
+
+
+# --session-authority: Hermes Agent 0.23.3 and newer serving the socket through its session authority
+# (gateway/session_controls.py), which says so in `gateway.ready`. Without it, the legacy dispatcher.
+# The keys each takes on `prompt.submit`: the authority's `submission` (session_controls.py@v0.23.4:897),
+# and the legacy contract (tui_gateway/contracts/prompt_voice.py@v0.23.4:26), which forbids the rest.
+AUTHORITY_SUBMIT_KEYS = {
+    "session_id", "text", "submission_id", "input_id", "queued", "attachments", "finite", "unattended",
+    "surface", "voice_context", "interrupted", "voice_turn", "display_kind", "title_preview",
+    "turn_author", "api_text", "model_override", "clarify_batch",
+}
+LEGACY_SUBMIT_KEYS = {
+    "session_id", "profile", "text", "display_kind", "interrupted", "queued", "surface", "voice_context",
+    "voice_turn", "title_preview", "truncate_before_user_ordinal", "truncate_before_row_id",
+    "truncate_before_message_id", "confirm_truncate", "confirm_empty_truncate", "confirm_deep_truncate",
+    "rebind_survivor_row_ids",
+}
+# Methods the authority has no handler for, answered -32601 (session_controls.py@v0.23.4:403).
+AUTHORITY_UNKNOWN = {"session.title"}
+ADMISSIONS = {}  # (stored chat, submission id) -> the receipt it was admitted with
+
+
+def install_authority_dispatch():
+    """`command.dispatch` on the session authority (--session-authority): every command is authorized
+    against a session of the profile it names (the gateway's own without one) before it runs
+    (gateway/session_commands.py@v0.23.4:422-430 `execute_command`), so a command without a session,
+    or with one that is gone or of another profile, is refused 4001 `not_found`
+    (session_authority.py@v0.23.4:230). A command Hermes doesn't have is 4001 `unsupported_command`
+    there (session_commands.py@v0.23.4:244), where the legacy dispatcher says 4018."""
+    inner = METHODS.get("command.dispatch")
+
+    def dispatch(params):
+        name = str(params.get("name") or "").lstrip("/")
+        sid = params.get("session_id") or ""
+        runtime = RUNTIME.get(sid) if sid else None
+        wanted = params.get("profile") or "default"
+        if runtime is None or runtime.get("dead") or (runtime.get("profile") or "default") != wanted:
+            print(f"[backend] command.dispatch /{name} refused not_found "
+                  f"(session {short_id(sid) if sid else 'none'}, profile {wanted})", flush=True)
+            raise RPCError(4001, "not_found", {"reason": "not_found"})
+        print(f"[backend] command.dispatch /{name} in session {short_id(sid)} ({wanted})", flush=True)
+        try:
+            if inner is None:
+                raise RPCError(4018, f"not a quick/plugin/bundle/skill command: /{name}")
+            return inner(params)
+        except RPCError as error:
+            if error.code != 4018:
+                raise
+            print(f"[backend] command.dispatch /{name} refused unsupported_command", flush=True)
+            raise RPCError(4001, "unsupported_command", {"reason": "unsupported_command"}) from None
+
+    METHODS["command.dispatch"] = dispatch
+
+
+def submit_refusal(params):
+    """The refusal Hermes gives a `prompt.submit` with keys it doesn't take, or None."""
+    if CONFIG.get("session_authority"):
+        problem = set(params) - AUTHORITY_SUBMIT_KEYS
+        request_id = params.get("submission_id") or params.get("input_id")
+        if problem or not isinstance(request_id, str) or not request_id:
+            return RPCError(4001, "invalid_params", {"reason": "invalid_params"})
+        return None
+    unknown = sorted(set(params) - LEGACY_SUBMIT_KEYS)
+    if unknown:
+        # tui_gateway/contracts/registry.py@v0.23.4:136 `validate_params`.
+        return RPCError(4000, f"invalid params for prompt.submit: {unknown[0]}: Extra inputs are not permitted — "
+                              "the client and the Hermes backend are out of sync (different versions); run "
+                              "`hermes update` and restart both")
+    return None
+
+
+def short_id(value):
+    return f"{value[:8]}…" if len(value) > 8 else value
 
 
 def method_session_create(params):
@@ -2397,7 +2478,62 @@ def submit_gate(sid, runtime, text):
 
 
 def method_prompt_submit(params):
-    sid, runtime = runtime_for(params)
+    return admit_prompt(params, submit_prompt)
+
+
+def admit_prompt(params, run):
+    """The socket's `prompt.submit` contract around `run(sid, runtime, params)`, for every chat kind."""
+    authority = CONFIG.get("session_authority")
+    # The legacy contract checks the keys before the handler runs; the authority finds the session
+    # first, then asks whether this socket holds it, then reads the message (`submission`).
+    refusal = None if authority else submit_refusal(params)
+    if refusal is not None:
+        print(f"[backend] prompt.submit refused {refusal.code} {refusal}", flush=True)
+        raise refusal
+    try:
+        sid, runtime = runtime_for(params)
+        if authority:
+            # gateway/session_controls.py@v0.23.4:899: a socket holds only the chats it created or
+            # resumed (`subscriptions`), so a reconnected one holds none until it resumes.
+            with LOCK:
+                subscribed = getattr(CURRENT, "peer", None) in runtime["peers"]
+            if not subscribed:
+                raise RPCError(4001, "permission_denied", {"reason": "permission_denied"})
+            refusal = submit_refusal(params)
+            if refusal is not None:
+                raise refusal
+    except RPCError as error:
+        # The id the app has to send again after it resumes, so a run's log shows it came back.
+        print(f"[backend] prompt.submit id={short_id(params.get('submission_id') or '-')} refused {error.code} {error}", flush=True)
+        raise
+    if not authority:
+        return run(sid, runtime, params)
+    request_id = params.get("submission_id") or params.get("input_id")
+    key = (runtime["stored"], request_id)
+    with LOCK:
+        admitted = ADMISSIONS.get(key)
+    if admitted is not None:
+        # A repeated id is the same admission (persistence/authority/admissions.py): no second turn.
+        print(f"[backend] prompt.submit id={short_id(request_id)} again: the same admission", flush=True)
+        return admitted
+    answer = run(sid, runtime, params)
+    # gateway/session_controls.py@v0.23.4:844 answers `asdict(AdmissionReceipt)`
+    # (gateway/session_contract.py@v0.23.4:53). A new message is written as queued and its turn
+    # starts after the answer (session_authority.py `_submit`), so its receipt says `queued`, an
+    # idle chat's too; only a steer reads as the running turn, `started` (`_receipt`).
+    steered = answer.get("status") in ("steered", "redirected")
+    with LOCK:
+        receipt = {
+            "admission_id": new_id(), "ref": {"profile_id": runtime["profile"], "session_id": runtime["stored"]},
+            "sequence": len(ADMISSIONS) + 1, "status": "started" if steered else "queued",
+            "outcome": None, "authority_epoch": 1, "execution_generation": None,
+        }
+        ADMISSIONS[key] = receipt
+    print(f"[backend] prompt.submit id={short_id(request_id)} admitted {receipt['status']}", flush=True)
+    return receipt
+
+
+def submit_prompt(sid, runtime, params):
     text = params.get("text") or ""
     gated = submit_gate(sid, runtime, text)
     if gated is not None:
@@ -2482,6 +2618,13 @@ def method_image_attach_bytes(params):
     """Staged for whichever prompt comes next on the chat (Hermes's `attached_images`): a refused
     prompt leaves them for the next one, until `image.detach` takes them back by path."""
     sid, runtime = runtime_for(params)
+    if CONFIG.get("session_authority"):
+        # gateway/session_images.py@v0.23.4 `attach_bytes`: like a submit, only on a chat this
+        # socket created or resumed.
+        with LOCK:
+            subscribed = getattr(CURRENT, "peer", None) in runtime["peers"]
+        if not subscribed:
+            raise RPCError(4001, "permission_denied", {"reason": "permission_denied"})
     path = f"/home/user/.hermes/images/upload_{uuid.uuid4().hex[:8]}.png"
     with LOCK:
         runtime.setdefault("attached_images", []).append(path)
@@ -2612,6 +2755,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def send_json(self, status, body, headers=None):
+        if status == 401 and body == {"detail": "Unauthorized"} and WEBAPP["gateway"] and CONFIG["password"]:
+            reason = self.webapp_refusal() or "no_cookie"
+            body = {"error": "session_expired" if reason == "invalid_or_expired_session" else "unauthenticated",
+                    "detail": "Unauthorized", "reason": reason, "login_url": "/login"}
         data = json.dumps(body).encode()
         if GATEWAY_PAGING:
             GATEWAY_PAGING[1](len(data))
@@ -2632,9 +2779,39 @@ class Handler(BaseHTTPRequestHandler):
                 jar[key] = value
         return jar
 
+    def session_cookie(self, bare):
+        """A sign-in cookie's name as Hermes gives it for this request (hermes-agent
+        `hermes_cli/dashboard_auth/cookies.py` `_resolved_name`, `gateway_cookie_name`): a
+        `__Secure-` or `__Host-` prefix over HTTPS, then `_<gateway>` on the Webapp."""
+        if self.headers.get("X-Forwarded-Proto", "").lower() == "https":
+            bare = ("__Secure-" if self.headers.get("X-Forwarded-Prefix") else "__Host-") + bare
+        return f"{bare}_{WEBAPP['gateway']}" if WEBAPP["gateway"] else bare
+
+    def webapp_refusal(self):
+        """Why the Webapp's gate refuses this request, or None (`middleware.py` `_unauth_response`)."""
+        jar = self.cookies()
+        if not jar.get(self.session_cookie("hermes_session_at")):
+            return "no_cookie"
+        binding = hmac.new(WEBAPP["token"].encode(), b"webapp-sign-in", hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(jar.get(self.session_cookie("hermes_webapp_signin"), "").encode(), binding.encode()):
+            return "signed_out"
+        if jar[self.session_cookie("hermes_session_at")] not in SESSIONS_AUTH:
+            return "invalid_or_expired_session"
+        return None
+
+    def note_cookie_names(self):
+        """Logs the names of the cookies the app sends when they change, never their values."""
+        names = sorted(self.cookies())
+        if names and names != WEBAPP["sent"]:
+            WEBAPP["sent"] = names
+            print("[backend] cookies sent:", " ".join(names), flush=True)
+
     def authorized(self, query=None):
         if CONFIG["password"]:
-            if self.cookies().get("hermes_session_at") in SESSIONS_AUTH:
+            self.note_cookie_names()
+            if WEBAPP["gateway"] and self.webapp_refusal() is None:
+                return True
+            if not WEBAPP["gateway"] and self.cookies().get("hermes_session_at") in SESSIONS_AUTH:
                 return True
             ticket = (query or {}).get("ticket", [None])[0]
             with LOCK:
@@ -2886,6 +3063,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(401, {"detail": "Invalid username or password"})
             access, refresh = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
             SESSIONS_AUTH[access] = body["username"]
+            if WEBAPP["gateway"]:
+                # routes.py `_set_session` and webapp_sign_in.py `bind`: the session cookies, the
+                # provider hint and the binding, all on Path=/ and suffixed with the gateway.
+                secure = "; Secure" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else ""
+                binding = hmac.new(WEBAPP["token"].encode(), b"webapp-sign-in", hashlib.sha256).hexdigest()
+                cookies = [("hermes_session_at", access, 3600), ("hermes_session_rt", refresh, 2592000),
+                           ("hermes_session_provider", "basic", 2592000), ("hermes_webapp_signin", binding, 2592000)]
+                return self.send_json(200, {"ok": True, "next": "/"}, headers=[
+                    ("Set-Cookie", f"{self.session_cookie(name)}={value}; Path=/; HttpOnly{secure}; SameSite=Lax; "
+                                   f"Max-Age={age}") for name, value, age in cookies])
             return self.send_json(200, {"ok": True, "next": "/"}, headers=[
                 ("Set-Cookie", f"hermes_session_at={access}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600"),
                 ("Set-Cookie", f"hermes_session_rt={refresh}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=2592000"),
@@ -3116,8 +3303,11 @@ class Handler(BaseHTTPRequestHandler):
             return peer.cut()
         with LOCK:
             CLIENTS.add(peer)
+        ready = {"heartbeat": True, "replay_epoch": EPOCH}
+        if CONFIG.get("session_authority"):
+            ready["session_authority"] = True  # tui_gateway/ws.py@v0.23.4:668
         peer.send({"jsonrpc": "2.0", "method": "event", "params": {
-            "type": "gateway.ready", "session_id": "", "payload": {"heartbeat": True, "replay_epoch": EPOCH}}})
+            "type": "gateway.ready", "session_id": "", "payload": ready}})
         try:
             while True:
                 text = peer.recv()
@@ -3156,8 +3346,18 @@ class Handler(BaseHTTPRequestHandler):
                 LEDGER.settle(rid, result=frame.get("result"), by=peer.identity, via="frame")
             return
         handler = METHODS.get(method)
+        if CONFIG.get("session_authority") and method in AUTHORITY_UNKNOWN:
+            return peer.send(err(rid, -32601, f"unknown method: {method} — not available on this Hermes backend",
+                                 {"reason": "unknown_method"}))
         if handler is None:
             return peer.send(err(rid, -32601, f"unknown method: {method}"))
+        if method == "session.resume" and CONFIG.get("session_authority"):
+            print(f"[backend] session.resume {short_id(str((frame.get('params') or {}).get('session_id') or ''))}",
+                  flush=True)
+        if method in ("session.list", "session.create") and CONFIG.get("session_authority"):
+            asked = frame.get("params") or {}
+            print(f"[backend] {method} profile={asked.get('profile') or '(own)'} title={asked.get('title')!r} "
+                  f"hidden={bool(asked.get('hidden') or asked.get('include_hidden'))}", flush=True)
         # /api/mock/lose-answer: this request's answer never comes, the socket dies instead, with the
         # request taken (it ran) or not (it never got here).
         with LOCK:
@@ -3188,6 +3388,13 @@ class Handler(BaseHTTPRequestHandler):
             peer.send(err(rid, 5000, f"{type(error).__name__}: {error}"))
 
 
+def webapp_gateway_id(value):
+    """`hermes_cli/webapp_sign_in.py` `_gateway`: the first 16 hex characters of a SHA-256."""
+    if not re.fullmatch(r"[0-9a-f]{16}", value):
+        raise argparse.ArgumentTypeError("a gateway id is 16 lowercase hex characters")
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--host", default="127.0.0.1")
@@ -3200,8 +3407,14 @@ def main():
     parser.add_argument("--api-server-only", action="store_true",
                         help="answer like the gateway's API server, not a backend: /health, "
                              "/api/sessions with --gateway-key, 404 elsewhere (refusals logged)")
+    parser.add_argument("--webapp-gateway", metavar="ID", type=webapp_gateway_id,
+                        help="with --password: sign in as the gateway's Webapp does (0.23.0 on), cookies "
+                             "named `<name>_<ID>` (16 lowercase hex) and a `hermes_webapp_signin` binding")
     parser.add_argument("--hermes-version", default="0.21.6",
                         help="the version /api/status reports; before 0.23.1 the socket closes on a message over 16 MiB")
+    parser.add_argument("--session-authority", action="store_true",
+                        help="with --hermes-version 0.23.3 or newer: the socket is served by the session authority, "
+                             "which takes a message only with a submission_id")
     parser.add_argument("--quiet-world", action="store_true", help="no background activity")
     parser.add_argument("--long-bot-chats", action="store_true", help="give Ops a long Bot Chat (180 messages)")
     parser.add_argument("--seed-bot-chat", metavar="JSON", help="load Ops's Bot Chat from a local export of message rows")
@@ -3290,11 +3503,20 @@ def main():
                         help="the widgets plugin's version: 1.5.0 has no `/app-widgets client` (widgets.py)")
     args = parser.parse_args()
     CONFIG["password"] = args.password
+    if args.webapp_gateway and not args.password:
+        parser.error("--webapp-gateway needs --password")
+    WEBAPP["gateway"] = args.webapp_gateway
     CONFIG["api_server_only"] = args.api_server_only
     CONFIG["gateway_key"] = args.gateway_key
     if args.auth_providers:
         CONFIG["auth_providers"] = [name.strip() for name in args.auth_providers.split(",") if name.strip()]
     CONFIG["hermes_version"] = args.hermes_version
+    if args.session_authority:
+        version = [int("".join(itertools.takewhile(str.isdigit, part)) or 0)
+                   for part in args.hermes_version.lstrip("vV").split(".")[:3]]
+        if (version + [0, 0, 0])[:3] < [0, 23, 3]:
+            parser.error("--session-authority needs --hermes-version 0.23.3 or newer")
+        CONFIG["session_authority"] = True
     if args.starve:
         STARVE.start(float("inf"), gap=STARVE.parse_gap(args.starve))
     CONFIG["late_store"] = args.late_store
@@ -3462,12 +3684,16 @@ def main():
         if args.long_chat:
             # After the widgets plugin, which stores the cards one of them shows.
             gateway.seed_landing_chats(widgets)
+    if CONFIG.get("session_authority"):
+        install_authority_dispatch()  # after every plugin, so it sees each one's commands
     if not args.quiet_world:
         threading.Thread(target=ambient, daemon=True).start()
     CONFIG["port"] = args.port
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True
     mode = f"gated (admin / {args.password})" if args.password else f"ungated (token {CONFIG['token']})"
+    if args.webapp_gateway:
+        mode += f", the gateway's Webapp {args.webapp_gateway}"
     if args.api_server_only:
         mode = f"the gateway's API server only (key {args.gateway_key})"
     elif args.auth_providers:
