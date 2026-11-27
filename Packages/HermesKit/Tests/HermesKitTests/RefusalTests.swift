@@ -4,13 +4,14 @@ import Testing
 
 @Suite("Hermes refusing or too busy to answer")
 struct RefusalTests {
-    @Test func socketFailureLogUsesOnlyDomainAndCode() {
+    @Test func socketFailureLogUsesOnlyDomainAndCode() throws {
         let refusal = GatewayRPCError(code: 4001, message: "private gateway text")
         let rpc = GatewaySocket.failureLogFields(refusal)
         #expect(rpc.domain == (refusal as NSError).domain)
         #expect(rpc.code == 4001)
 
-        let transport = URLError(.timedOut, userInfo: [NSURLErrorFailingURLStringErrorKey: "https://example.invalid/private"])
+        let url = try #require(URL(string: "https://example.invalid/private"))
+        let transport = URLError(.timedOut, userInfo: [NSURLErrorFailingURLErrorKey: url])
         let network = GatewaySocket.failureLogFields(transport)
         #expect(network.domain == NSURLErrorDomain)
         #expect(network.code == URLError.timedOut.rawValue)
