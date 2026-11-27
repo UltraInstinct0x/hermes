@@ -103,6 +103,10 @@ public struct PushNotice: Codable, Sendable, Hashable, Identifiable {
     public var summary: String
     public var sessionID: String?
     public var requestID: String?
+    public var ledgerID: String?
+    public var gatewayID: String?
+    public var profileID: String?
+    public var deadline: Date?
     public var expiresAt: Date?
     public var category: String?
     public var gateway: Gateway?
@@ -163,6 +167,7 @@ public struct PushNotice: Codable, Sendable, Hashable, Identifiable {
         case kind, id, title, body, subtitle, hidden, thread, summary, category, gateway, open, resolved
         case sessionID = "session_id"
         case requestID = "request_id"
+        case ledgerID = "ledger_id", gatewayID = "gateway_id", profileID = "profile_id", deadline
         case expiresAt = "expires_at"
         case sentAt = "sent_at"
         case command
@@ -193,7 +198,8 @@ public struct PushNotice: Codable, Sendable, Hashable, Identifiable {
         command: String? = nil, detail: String? = nil, choices: [String] = [], answer: Answer? = nil,
         questions: [Question] = [], bot: String? = nil, memberID: String? = nil, roomID: String? = nil,
         failed: Bool = false, mention: Bool = false, ids: [String] = [], sessions: [String] = [],
-        rooms: [String] = [], read: ReadMarks? = nil
+        rooms: [String] = [], read: ReadMarks? = nil, ledgerID: String? = nil, gatewayID: String? = nil,
+        profileID: String? = nil, deadline: Date? = nil
     ) {
         self.kind = kind
         self.id = id
@@ -205,6 +211,10 @@ public struct PushNotice: Codable, Sendable, Hashable, Identifiable {
         self.summary = summary
         self.sessionID = sessionID
         self.requestID = requestID
+        self.ledgerID = ledgerID
+        self.gatewayID = gatewayID
+        self.profileID = profileID
+        self.deadline = deadline
         self.expiresAt = expiresAt
         self.gateway = gateway
         self.open = open
@@ -242,6 +252,10 @@ public struct PushNotice: Codable, Sendable, Hashable, Identifiable {
         summary = try text(.summary)
         sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
         requestID = try c.decodeIfPresent(String.self, forKey: .requestID)
+        ledgerID = try c.decodeIfPresent(String.self, forKey: .ledgerID)
+        gatewayID = try c.decodeIfPresent(String.self, forKey: .gatewayID)
+        profileID = try c.decodeIfPresent(String.self, forKey: .profileID)
+        deadline = try date(.deadline)
         expiresAt = try date(.expiresAt)
         category = try c.decodeIfPresent(String.self, forKey: .category)
         gateway = try c.decodeIfPresent(Gateway.self, forKey: .gateway)
@@ -287,6 +301,10 @@ public struct PushNotice: Codable, Sendable, Hashable, Identifiable {
         }
         try c.encodeIfPresent(sessionID, forKey: .sessionID)
         try c.encodeIfPresent(requestID, forKey: .requestID)
+        try c.encodeIfPresent(ledgerID, forKey: .ledgerID)
+        try c.encodeIfPresent(gatewayID, forKey: .gatewayID)
+        try c.encodeIfPresent(profileID, forKey: .profileID)
+        try c.encodeIfPresent(deadline?.timeIntervalSince1970, forKey: .deadline)
         try c.encodeIfPresent(expiresAt?.timeIntervalSince1970, forKey: .expiresAt)
         try c.encodeIfPresent(category, forKey: .category)
         try c.encodeIfPresent(gateway, forKey: .gateway)
@@ -359,7 +377,7 @@ public struct PushNotice: Codable, Sendable, Hashable, Identifiable {
 
     /// Past its deadline: answering would only fail.
     public func isExpired(now: Date = .now) -> Bool {
-        expiresAt.map { $0 < now } ?? false
+        (deadline ?? expiresAt).map { $0 <= now } ?? false
     }
 
     /// Choices shown as notification actions: only a single, single-select question's.

@@ -1,5 +1,6 @@
 import Foundation
 import HermesKit
+import HermesPush
 import Network
 import Observation
 #if os(iOS)
@@ -7,6 +8,17 @@ import UIKit
 #else
 import AppKit
 #endif
+
+extension GatewaySocket.ClientIdentity {
+    static var hermesApp: Self {
+        #if os(iOS)
+        let label = UIDevice.current.userInterfaceIdiom == .pad ? "Hermes on iPad" : "Hermes on iPhone"
+        return Self(id: PushShared.current.deviceID, label: label, kind: "ios")
+        #else
+        return Self(id: PushShared.current.deviceID, label: "Hermes on Mac", kind: "macos")
+        #endif
+    }
+}
 
 /// Bot Mode for one gateway: the roster of Bots on its Hermes backend (`hermes serve`),
 /// their Bot Chats, looks and routines — Hermes Desktop's Bots pane, natively.
@@ -42,6 +54,7 @@ final class BotRoster {
             guard state != oldValue else { return }
             ConnectionLog.logger.notice("bots: \(String(describing: self.state), privacy: .public)")
             if state.isOnline { resumeConnectedWaiters() }
+            workspace?.app?.invalidateLedger()
         }
     }
     /// Every Bot as `profiles.list` reports it.
@@ -59,6 +72,7 @@ final class BotRoster {
     /// The gateway has answered a roster read: only now can a Bot missing from the list be called
     /// missing (`docs/connecting-and-voice.md` §8).
     var hasLiveList: Bool { load.hasLiveList }
+    private(set) var installID: String?
     /// Bots with activity the person hasn't seen (keyed by profile name).
     private(set) var unread: Set<String> = [] {
         didSet { if unread != oldValue { workspace?.unread.update() } }
@@ -686,13 +700,13 @@ final class BotRoster {
     /// token is read again once.
     private func openSocket() async throws -> GatewaySocket {
         do {
-            let socket = GatewaySocket(url: try await client.gatewaySocketURL())
+            let socket = GatewaySocket(url: try await client.gatewaySocketURL(), clientIdentity: .hermesApp)
             try await socket.connect()
             return socket
         } catch {
             guard link.signIn == .automatic, Self.isAuthFailure(error) else { throw error }
             _ = try await client.discoverSessionToken()
-            let socket = GatewaySocket(url: try await client.gatewaySocketURL())
+            let socket = GatewaySocket(url: try await client.gatewaySocketURL(), clientIdentity: .hermesApp)
             try await socket.connect()
             return socket
         }
@@ -1326,6 +1340,9 @@ final class BotRoster {
     }
 
     private func route(_ event: GatewayEvent) {
+        if event.type.hasPrefix("request.") || event.type == "approval.cancelled" {
+            workspace?.app?.invalidateLedger()
+        }
         // The gateway's change watcher: broadcast to every client, not tagged with a profile.
         if event.type == "projects.changed" {
             workspace?.projects.changeEvent(event.type)
@@ -1371,6 +1388,9 @@ final class BotRoster {
     }
 
     private func handle(_ request: GatewayServerRequest, on socket: GatewaySocket) async {
+        if ["approval", "clarify", "secret", "sudo"].contains(request.method) {
+            workspace?.app?.invalidateLedger()
+        }
         let target = allConversations.first { $0.runtimeSessionID == request.sessionID }
         guard let target else {
             // No chat here shows that session; let a window that does answer it.
@@ -1664,6 +1684,7 @@ final class BotRoster {
             // it); back quickly, busy may clear. Only an open socket's answer counts.
             if socket != nil { updateBusy { $0.answered(ticket) } }
             guard case .array(let rows)? = result["profiles"] else { return }
+            installID = result["install_id"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
             apply(rows.map(BotProfile.init(json:)).filter { !$0.name.isEmpty })
             LaunchTrace.mark("Bots fetched (\(rows.count))", id: "Bots fetched")
             if rows != cachedRows {

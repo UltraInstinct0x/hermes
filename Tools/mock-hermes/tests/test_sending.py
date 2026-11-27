@@ -43,13 +43,14 @@ def wait_for(url, server):
 class MockCase(unittest.TestCase):
     """A backend and gateway of its own; `relay` is the push plugin's (`none`: no plugin)."""
     relay = "none"
+    backend_args = ()
 
     @classmethod
     def setUpClass(cls):
         cls.port, cls.gateway = free_port(), free_port()
         cls.server = subprocess.Popen(
             [sys.executable, "-I", BACKEND, "--port", str(cls.port), "--gateway-port", str(cls.gateway), "--token", TOKEN,
-             "--quiet-world", "--push-relay", cls.relay, "--gateway-key", KEY],
+             "--quiet-world", "--push-relay", cls.relay, "--gateway-key", KEY, *cls.backend_args],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         wait_for(f"http://127.0.0.1:{cls.port}/", cls.server)
         wait_for(f"http://127.0.0.1:{cls.gateway}/health", cls.server)

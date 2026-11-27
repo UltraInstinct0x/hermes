@@ -361,6 +361,8 @@ def test_sudo_and_clarify(hermes):
         alert = wait_for(lambda: next(iter(pushes_for(token, "alert")), None))
         content = opened(key, alert)
         assert content["kind"] == "password" and content["category"] == "OPEN"
+        assert content["body"] == "Open Hermes to enter it."
+        assert "ripgrep" not in json.dumps(content)
         assert alert["payload"]["aps"]["alert"]["title"] == "Hermes needs a password"
         human.outcome = "provided"
     withdraw = wait_for(lambda: next(iter(pushes_for(token, "background")), None))
@@ -376,6 +378,23 @@ def test_sudo_and_clarify(hermes):
         assert content["questions"][0]["choices"][-1] == "other"          # the content extension shows all
         assert alert["payload"]["aps"]["category"] == "QUESTION"
         human.outcome = "submitted"
+
+
+def test_alert_carries_authoritative_ledger_locator_and_deadline(hermes):
+    plugins, handler = hermes
+    key, token = make_device(handler, "ledger-locator")
+    deadline = int(time.time()) + 50
+    plugins.invoke_hook("on_human_input_request", kind="clarify", request_id="human-request",
+                        session_key="20261014_ledger_test", prompt="Continue?",
+                        ledger_id="opaque-id", gateway_id="box", profile_id="research",
+                        expires_at=deadline)
+    alert = wait_for(lambda: next(iter(pushes_for(token, "alert")), None))
+    content = opened(key, alert)
+    assert content["ledger_id"] == "opaque-id"
+    assert content["gateway_id"] == "box"
+    assert content["profile_id"] == "research"
+    assert content["deadline"] == alert["expiration"] == deadline
+    plugins.invoke_hook("on_human_input_resolved", kind="clarify", request_id="human-request")
 
 
 def test_reply_respects_presence_and_duration(hermes):
